@@ -1,0 +1,28 @@
+# Rust
+core/target/
+
+# Flutter
+ui/build/
+ui/.dart_tool/
+ui/.packages
+ui/.flutter-plugins
+ui/.flutter-plugins-dependencies
+ui/android/app/build/
+ui/ios/
+ui/pubspec.lock
+
+# Python
+scripts/__pycache__/
+
+# Dictionaries & voices (heavy files)
+dictionaries/*.xml
+dictionaries/*.db
+dictionaries/*.zst
+voices/*.onnx
+voices/*.json
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo

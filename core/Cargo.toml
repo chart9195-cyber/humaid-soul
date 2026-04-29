@@ -1,0 +1,14 @@
+[package]
+name = "humaid_soul_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "humaid_core"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# PDF parsing & word extraction
+# mupdf-rs = { git = "https://github.com/serde-yaml/mupdf-rs" }  # or pdf-extract
+# rusqlite = { version = "0.31", features = ["bundled"] }
+# strsim = "0.10"

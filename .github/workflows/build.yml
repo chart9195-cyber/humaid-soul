@@ -1,0 +1,26 @@
+name: Build HUMAID SOUL
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-dictionary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build dictionary database
+        run: python scripts/build_dictionary.py
+      - name: Compress dictionary
+        run: zstd -19 soul_dict.db -o soul_dict.db.zst
+      - name: Upload dictionary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soul-dictionary
+          path: soul_dict.db.zst
+
+  # (Future jobs: build-rust-core, build-flutter-apk)
