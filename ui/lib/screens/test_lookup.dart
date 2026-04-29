@@ -23,9 +23,8 @@ class _TestLookupScreenState extends State<TestLookupScreen> {
       _result = '';
     });
 
-    // Ensure core is loaded (should be done once at app start)
     final bridge = CoreBridge();
-    if (!bridge._loaded) {
+    if (!bridge.isLoaded) {
       final ok = await bridge.load();
       if (!ok) {
         setState(() {
@@ -37,7 +36,6 @@ class _TestLookupScreenState extends State<TestLookupScreen> {
     }
 
     final json = bridge.lookup(word);
-    // Pretty-print the JSON
     try {
       final parsed = jsonDecode(json);
       if (parsed is List && parsed.isEmpty) {
