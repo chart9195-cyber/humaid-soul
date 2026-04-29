@@ -7,41 +7,47 @@ static DICTIONARY: OnceCell<Connection> = OnceCell::new();
 
 /// Load the dictionary from a Zstandard‑compressed SQLite file.
 pub fn load_dictionary(path_zst: &str) -> bool {
-    let mut reader = match std::fs::File::open(path_zst) {
+    let mut file = match std::fs::File::open(path_zst) {
         Ok(f) => f,
         Err(e) => {
             log::error!("Failed to open dictionary file: {}", e);
             return false;
         }
     };
+
     let mut compressed = Vec::new();
-    if reader.read_to_end(&mut compressed).is_err() {
+    if file.read_to_end(&mut compressed).is_err() {
         return false;
     }
 
-    // Decompress Zstd
-    let decoder = zstd::Decoder::new(&compressed[..]).unwrap();
+    // Decompress using streaming decoder
+    let mut decoder = match zstd::stream::Decoder::new(&compressed[..]) {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("Failed to create Zstd decoder: {}", e);
+            return false;
+        }
+    };
+
     let mut decompressed = Vec::new();
-    if decoder.is_err() {
-        return false;
-    }
-    // Actually use the decoder correctly
-    let mut decoder = zstd::stream::Decoder::new(&compressed[..]).unwrap();
     if decoder.read_to_end(&mut decompressed).is_err() {
         return false;
     }
 
+    // Write to a temporary file (Android‑friendly /tmp)
     let temp_path = "/tmp/soul_dict_temp.db";
     if std::fs::write(temp_path, &decompressed).is_err() {
         return false;
     }
+
     let conn = match Connection::open(temp_path) {
         Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to open temp DB: {}", e);
+            log::error!("Failed to open temporary dictionary DB: {}", e);
             return false;
         }
     };
+
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
     DICTIONARY.set(conn).is_ok()
@@ -55,7 +61,7 @@ struct WordEntry {
     synonyms: Vec<String>,
 }
 
-/// Look up a word – first direct, then lemma, then fuzzy.
+/// Look up a word: direct match → lemma → fuzzy fallback.
 pub fn lookup(word: &str) -> String {
     let conn = match DICTIONARY.get() {
         Some(c) => c,
@@ -83,7 +89,7 @@ pub fn lookup(word: &str) -> String {
     "[]".to_string()
 }
 
-/// Return lemma of a word.
+/// Return the lemma (base form) of a given word.
 pub fn lemmatize(word: &str) -> String {
     let conn = match DICTIONARY.get() {
         Some(c) => c,
@@ -92,7 +98,7 @@ pub fn lemmatize(word: &str) -> String {
     lemmatize_impl(conn, word)
 }
 
-/// Fuzzy search returning up to max_results close matches.
+/// Fuzzy search: returns up to `max_results` closest matches.
 pub fn fuzzy_search(word: &str, max_results: usize) -> String {
     let conn = match DICTIONARY.get() {
         Some(c) => c,
@@ -102,39 +108,49 @@ pub fn fuzzy_search(word: &str, max_results: usize) -> String {
     serde_json::to_string(&matches).unwrap_or_default()
 }
 
-// ---- Internal helpers ----
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
-    let stmt = conn.prepare(
-        "SELECT w.word, w.word_type, d.definition, s.synonym
-         FROM words w
-         LEFT JOIN definitions d ON w.id = d.word_id
-         LEFT JOIN synonyms s ON w.id = s.word_id
-         WHERE w.word = ?1 COLLATE NOCASE"
-    ).ok()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT w.word, w.word_type, d.definition, s.synonym
+             FROM words w
+             LEFT JOIN definitions d ON w.id = d.word_id
+             LEFT JOIN synonyms s ON w.id = s.word_id
+             WHERE w.word = ?1 COLLATE NOCASE",
+        )
+        .ok()?;
 
-    let rows = stmt.query_map(params![word], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    }).ok()?;
+    let rows = stmt
+        .query_map(params![word], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .ok()?;
 
     let mut word_name = String::new();
     let mut word_type = String::new();
-    let mut definitions = Vec::new();
-    let mut synonyms = Vec::new();
+    let mut definitions: Vec<String> = Vec::new();
+    let mut synonyms: Vec<String> = Vec::new();
 
     for row in rows.flatten() {
         word_name = row.0;
         word_type = row.1.unwrap_or_default();
         if let Some(def) = row.2 {
-            if !definitions.contains(&def) { definitions.push(def); }
+            if !definitions.contains(&def) {
+                definitions.push(def);
+            }
         }
         if let Some(syn) = row.3 {
-            if syn != word_name && !synonyms.contains(&syn) { synonyms.push(syn); }
+            if syn != word_name && !synonyms.contains(&syn) {
+                synonyms.push(syn);
+            }
         }
     }
 
@@ -151,24 +167,28 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
-    // Use Connection::query_row directly, avoiding mutable Statement issue.
-    let result = conn.query_row(
+    // Use the high‑level query_row directly – no mutable Statement needed.
+    match conn.query_row(
         "SELECT lemma FROM lemma_map WHERE inflected = ?1",
         params![word],
         |row| row.get::<_, String>(0),
-    );
-    if let Ok(lemma) = result {
-        lemma
-    } else {
-        word.to_string()
+    ) {
+        Ok(lemma) => lemma,
+        Err(_) => word.to_string(),
     }
 }
 
 fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> {
-    let first_char = word.chars().next().map(|c| format!("{}%", c)).unwrap_or("%".to_string());
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT word FROM words WHERE word LIKE ?1 LIMIT 200"
-    ).unwrap();
+    let first_char = word
+        .chars()
+        .next()
+        .map(|c| format!("{}%", c))
+        .unwrap_or_else(|| "%".to_string());
+
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT word FROM words WHERE word LIKE ?1 LIMIT 200")
+        .unwrap();
+
     let candidates: Vec<String> = stmt
         .query_map(params![first_char], |row| row.get::<_, String>(0))
         .unwrap()
@@ -178,12 +198,13 @@ fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> 
     let mut scored: Vec<(f64, String)> = candidates
         .into_iter()
         .map(|candidate| {
-            let dist = strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
+            let dist =
+                strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
             (dist, candidate)
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(max_results);
     scored.into_iter().map(|(_, w)| w).collect()
 }
