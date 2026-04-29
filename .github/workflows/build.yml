@@ -8,8 +8,6 @@ on:
 jobs:
   build-dictionary:
     runs-on: ubuntu-latest
-    outputs:
-      dict-artifact-name: ${{ steps.upload_dict.outputs.artifact-name }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
@@ -22,22 +20,19 @@ jobs:
         run: python scripts/build_dictionary.py
       - name: Compress dictionary
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
-      - id: upload_dict
-        name: Upload dictionary artifact
+      - name: Upload dictionary artifact
         uses: actions/upload-artifact@v4
         with:
           name: soul-dictionary
           path: soul_dict.db.zst
 
   build-rust-core:
-    needs: build-dictionary
     runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
           - aarch64-linux-android
           - x86_64-linux-android
-          # - armv7-linux-androideabi  (optional)
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
@@ -47,8 +42,7 @@ jobs:
           target: ${{ matrix.target }}
           override: true
       - name: Install cargo-ndk
-        run: |
-          cargo install cargo-ndk
+        run: cargo install cargo-ndk
       - name: Build library
         working-directory: core
         run: |
@@ -58,5 +52,3 @@ jobs:
         with:
           name: rust-libs-${{ matrix.target }}
           path: jniLibs/${{ matrix.target }}/release/libhumaid_core.so
-
-  # (Future job: flutter-apk will combine dictionary + .so files)
