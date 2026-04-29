@@ -3,24 +3,39 @@ name: Build HUMAID SOUL
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:  # allow manual trigger
 
 jobs:
   build-dictionary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install nltk zstandard
+
       - name: Build dictionary database
         run: python scripts/build_dictionary.py
-      - name: Compress dictionary
+
+      - name: Compress dictionary with Zstd
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
+
       - name: Upload dictionary artifact
         uses: actions/upload-artifact@v4
         with:
           name: soul-dictionary
           path: soul_dict.db.zst
 
-  # (Future jobs: build-rust-core, build-flutter-apk)
+      # If triggered by tag, also attach to release
+      - name: Upload to release (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: soul_dict.db.zst
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
