@@ -74,18 +74,11 @@ jobs:
 
       - name: Generate missing Android project files
         run: |
-          # Create a temporary Flutter project to steal its android/ folder
           TEMP_DIR=$(mktemp -d)
           cd "$TEMP_DIR"
           flutter create --project-name humaid_soul_ui --org com.humaid.soul temp_app
           cd -
-          # Safely copy the android/ folder and Gradle wrappers into our ui/
           cp -r "$TEMP_DIR/temp_app/android" ui/
-          cp "$TEMP_DIR/temp_app/gradlew" ui/ 2>/dev/null || true
-          cp "$TEMP_DIR/temp_app/gradlew.bat" ui/ 2>/dev/null || true
-          cp -r "$TEMP_DIR/temp_app/gradle" ui/ 2>/dev/null || true
-          # Ensure gradlew is executable
-          chmod +x ui/gradlew
           rm -rf "$TEMP_DIR"
 
       - name: Install Flutter dependencies
