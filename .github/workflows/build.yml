@@ -31,8 +31,9 @@ jobs:
     strategy:
       matrix:
         target:
-          - aarch64-linux-android
-          - x86_64-linux-android
+          - aarch64-linux-android      # modern 64‑bit ARM (most phones)
+          - armv7-linux-androideabi    # 32‑bit ARM (older devices)
+          - x86_64-linux-android       # 64‑bit x86 (emulators, some tablets)
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
@@ -41,6 +42,9 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+      - name: Install Android NDK (needed by cargo-ndk)
+        run: |
+          echo "NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
       - name: Build library

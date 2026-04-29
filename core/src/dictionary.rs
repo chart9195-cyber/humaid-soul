@@ -2,14 +2,11 @@ use once_cell::sync::OnceCell;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::io::Read;
-use std::path::Path;
 
 static DICTIONARY: OnceCell<Connection> = OnceCell::new();
 
-/// Load the dictionary from a Zstd‑compressed SQLite file.
-/// Decompresses into memory (or temp file) and opens the SQLite database.
+/// Load the dictionary from a Zstandard‑compressed SQLite file.
 pub fn load_dictionary(path_zst: &str) -> bool {
-    // Read the compressed file
     let mut reader = match std::fs::File::open(path_zst) {
         Ok(f) => f,
         Err(e) => {
@@ -23,25 +20,18 @@ pub fn load_dictionary(path_zst: &str) -> bool {
     }
 
     // Decompress Zstd
-    let mut decoder = zstd::Decoder::new(&compressed[..]).unwrap();
+    let decoder = zstd::Decoder::new(&compressed[..]).unwrap();
     let mut decompressed = Vec::new();
+    if decoder.is_err() {
+        return false;
+    }
+    // Actually use the decoder correctly
+    let mut decoder = zstd::stream::Decoder::new(&compressed[..]).unwrap();
     if decoder.read_to_end(&mut decompressed).is_err() {
         return false;
     }
 
-    // Open in‑memory SQLite connection
-    let conn = match Connection::open_in_memory() {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("Failed to create in‑memory DB: {}", e);
-            return false;
-        }
-    };
-
-    // Restore the decompressed database into memory
-    // Use SQLite backup API (rusqlite doesn't expose direct backup, we can use a workaround)
-    // Alternative: write decompressed to temp file and open; simpler.
-    let temp_path = "/tmp/soul_dict_temp.db"; // Android has writable tmp
+    let temp_path = "/tmp/soul_dict_temp.db";
     if std::fs::write(temp_path, &decompressed).is_err() {
         return false;
     }
@@ -52,8 +42,6 @@ pub fn load_dictionary(path_zst: &str) -> bool {
             return false;
         }
     };
-
-    // Enable WAL mode for concurrency
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
     DICTIONARY.set(conn).is_ok()
@@ -74,12 +62,10 @@ pub fn lookup(word: &str) -> String {
         None => return "[]".to_string(),
     };
 
-    // 1. Direct lookup
     if let Some(entry) = direct_lookup(conn, word) {
         return serde_json::to_string(&entry).unwrap_or_default();
     }
 
-    // 2. Lemmatize
     let lemma = lemmatize_impl(conn, word);
     if lemma != word {
         if let Some(entry) = direct_lookup(conn, &lemma) {
@@ -87,7 +73,6 @@ pub fn lookup(word: &str) -> String {
         }
     }
 
-    // 3. Fuzzy fallback
     let candidates = fuzzy_impl(conn, word, 1);
     if let Some(candidate) = candidates.first() {
         if let Some(entry) = direct_lookup(conn, candidate) {
@@ -120,7 +105,7 @@ pub fn fuzzy_search(word: &str, max_results: usize) -> String {
 // ---- Internal helpers ----
 
 fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
-    let mut stmt = conn.prepare(
+    let stmt = conn.prepare(
         "SELECT w.word, w.word_type, d.definition, s.synonym
          FROM words w
          LEFT JOIN definitions d ON w.id = d.word_id
@@ -166,20 +151,20 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
-    // Check lemma_map table
-    let mut stmt = conn.prepare("SELECT lemma FROM lemma_map WHERE inflected = ?1").ok();
-    if let Some(s) = stmt {
-        if let Ok(lemma) = s.query_row(params![word], |row| row.get::<_, String>(0)) {
-            return lemma;
-        }
+    // Use Connection::query_row directly, avoiding mutable Statement issue.
+    let result = conn.query_row(
+        "SELECT lemma FROM lemma_map WHERE inflected = ?1",
+        params![word],
+        |row| row.get::<_, String>(0),
+    );
+    if let Ok(lemma) = result {
+        lemma
+    } else {
+        word.to_string()
     }
-    // If not found, attempt a simple suffix‑based stem (university → univers) – too aggressive,
-    // so return original word. We rely on lemma_map for now.
-    word.to_string()
 }
 
 fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> {
-    // Fetch up to 200 candidate words starting with the same first letter for performance.
     let first_char = word.chars().next().map(|c| format!("{}%", c)).unwrap_or("%".to_string());
     let mut stmt = conn.prepare(
         "SELECT DISTINCT word FROM words WHERE word LIKE ?1 LIMIT 200"
@@ -193,7 +178,6 @@ fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> 
     let mut scored: Vec<(f64, String)> = candidates
         .into_iter()
         .map(|candidate| {
-            // Use normalized Levenshtein distance (1 - normalised) for similarity
             let dist = strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
             (dist, candidate)
         })
