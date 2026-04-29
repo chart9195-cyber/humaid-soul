@@ -3,39 +3,60 @@ name: Build HUMAID SOUL
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:  # allow manual trigger
+  workflow_dispatch:
 
 jobs:
   build-dictionary:
     runs-on: ubuntu-latest
+    outputs:
+      dict-artifact-name: ${{ steps.upload_dict.outputs.artifact-name }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install nltk zstandard
-
       - name: Build dictionary database
         run: python scripts/build_dictionary.py
-
-      - name: Compress dictionary with Zstd
+      - name: Compress dictionary
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
-
-      - name: Upload dictionary artifact
+      - id: upload_dict
+        name: Upload dictionary artifact
         uses: actions/upload-artifact@v4
         with:
           name: soul-dictionary
           path: soul_dict.db.zst
 
-      # If triggered by tag, also attach to release
-      - name: Upload to release (if tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+  build-rust-core:
+    needs: build-dictionary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-linux-android
+          - x86_64-linux-android
+          # - armv7-linux-androideabi  (optional)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
         with:
-          files: soul_dict.db.zst
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+      - name: Install cargo-ndk
+        run: |
+          cargo install cargo-ndk
+      - name: Build library
+        working-directory: core
+        run: |
+          cargo ndk -t ${{ matrix.target }} -o ../jniLibs build --release
+      - name: Upload compiled .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-libs-${{ matrix.target }}
+          path: jniLibs/${{ matrix.target }}/release/libhumaid_core.so
+
+  # (Future job: flutter-apk will combine dictionary + .so files)
