@@ -41,7 +41,6 @@ jobs:
       - name: Build and copy Rust libraries
         working-directory: core
         run: |
-          # Define target -> Android ABI mapping
           declare -A ABIS=(
             ["aarch64-linux-android"]="arm64-v8a"
             ["armv7-linux-androideabi"]="armeabi-v7a"
@@ -53,7 +52,6 @@ jobs:
             echo "Building for $target ($abi)..."
             cargo ndk -t "$target" build --release
 
-            # Find the built library (it's in target/<target>/release/lib*.so)
             lib_path=$(find "target/$target/release" -maxdepth 1 -name '*.so' -print -quit)
             if [ -z "$lib_path" ]; then
               echo "Error: No .so found for target $target"
@@ -61,22 +59,39 @@ jobs:
             fi
             echo "Found library: $lib_path"
 
-            # Place into Flutter's jniLibs
             dest="../../../ui/android/app/src/main/jniLibs/$abi"
             mkdir -p "$dest"
             cp "$lib_path" "$dest/"
             echo "Copied to $dest/"
           done
 
-      # ---------- Flutter APK ----------
+      # ---------- Flutter setup & APK ----------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: stable
+
+      - name: Generate missing Android project files
+        run: |
+          # Create a temporary Flutter project to steal its android/ folder
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          flutter create --project-name humaid_soul_ui --org com.humaid.soul temp_app
+          cd -
+          # Safely copy the android/ folder and Gradle wrappers into our ui/
+          cp -r "$TEMP_DIR/temp_app/android" ui/
+          cp "$TEMP_DIR/temp_app/gradlew" ui/ 2>/dev/null || true
+          cp "$TEMP_DIR/temp_app/gradlew.bat" ui/ 2>/dev/null || true
+          cp -r "$TEMP_DIR/temp_app/gradle" ui/ 2>/dev/null || true
+          # Ensure gradlew is executable
+          chmod +x ui/gradlew
+          rm -rf "$TEMP_DIR"
+
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
+
       - name: Build debug APK
         working-directory: ui
         run: flutter build apk --debug
