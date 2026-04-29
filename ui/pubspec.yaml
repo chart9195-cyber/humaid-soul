@@ -11,7 +11,6 @@ dependencies:
     sdk: flutter
   ffi: ^2.1.0
   path_provider: ^2.1.0
-  # Future: dart_pdf, flutter_tts, etc.
 
 dev_dependencies:
   flutter_test:
@@ -20,3 +19,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/soul_dict.db.zst

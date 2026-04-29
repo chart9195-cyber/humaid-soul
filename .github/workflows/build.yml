@@ -1,4 +1,4 @@
-name: Build HUMAID SOUL
+name: Build HUMAID SOUL (unified)
 
 on:
   push:
@@ -6,98 +6,63 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-dictionary:
+  build-all:
     runs-on: ubuntu-latest
     steps:
+      # ---------- Checkout ----------
       - uses: actions/checkout@v4
+
+      # ---------- Dictionary ----------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install nltk zstandard
-      - name: Build dictionary database
+      - name: Build dictionary
         run: python scripts/build_dictionary.py
       - name: Compress dictionary
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
-      - name: Upload dictionary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: soul-dictionary
-          path: soul_dict.db.zst
+      - name: Copy dictionary to Flutter assets
+        run: mkdir -p ui/assets && cp soul_dict.db.zst ui/assets/
 
-  build-rust-core:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - aarch64-linux-android
-          - armv7-linux-androideabi
-          - x86_64-linux-android
-    steps:
-      - uses: actions/checkout@v4
+      # ---------- Rust cross-compilation ----------
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }}
+          target: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
           override: true
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
-      - name: Build library
+      - name: Build Rust library (all targets)
         working-directory: core
-        run: cargo ndk -t ${{ matrix.target }} -o ../jniLibs build --release
-      - name: Upload compiled .so
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-libs-${{ matrix.target }}
-          path: jniLibs/${{ matrix.target }}/release/libhumaid_core.so
+        run: |
+          cargo ndk -t aarch64-linux-android -o ../jniLibs build --release
+          cargo ndk -t armv7-linux-androideabi -o ../jniLibs build --release
+          cargo ndk -t x86_64-linux-android -o ../jniLibs build --release
+      - name: Copy .so files into Flutter project
+        run: |
+          mkdir -p ui/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p ui/android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p ui/android/app/src/main/jniLibs/x86_64
+          cp jniLibs/aarch64-linux-android/release/libhumaid_core.so ui/android/app/src/main/jniLibs/arm64-v8a/
+          cp jniLibs/armv7-linux-androideabi/release/libhumaid_core.so ui/android/app/src/main/jniLibs/armeabi-v7a/
+          cp jniLibs/x86_64-linux-android/release/libhumaid_core.so ui/android/app/src/main/jniLibs/x86_64/
 
-  build-flutter-apk:
-    needs: [build-dictionary, build-rust-core]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download dictionary artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: soul-dictionary
-          path: assets/
-
-      - name: Download Rust libs (aarch64)
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-libs-aarch64-linux-android
-          path: ui/android/app/src/main/jniLibs/arm64-v8a/
-
-      - name: Download Rust libs (armv7)
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-libs-armv7-linux-androideabi
-          path: ui/android/app/src/main/jniLibs/armeabi-v7a/
-
-      - name: Download Rust libs (x86_64)
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-libs-x86_64-linux-android
-          path: ui/android/app/src/main/jniLibs/x86_64/
-
+      # ---------- Flutter APK ----------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: stable
-
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
-
-      - name: Build APK (debug)
+      - name: Build debug APK
         working-directory: ui
         run: flutter build apk --debug
 
-      - name: Upload APK artifact
+      # ---------- Upload final APK ----------
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: humaid-soul-debug-apk
