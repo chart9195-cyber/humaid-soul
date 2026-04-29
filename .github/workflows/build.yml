@@ -32,28 +32,41 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          # Locate the pre-installed NDK on GitHub runner
           ANDROID_NDK=$(ls $ANDROID_HOME/ndk/ | sort -r | head -1)
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK" >> $GITHUB_ENV
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Build Rust library (all targets)
+      - name: Build and copy Rust libraries
         working-directory: core
         run: |
-          cargo ndk -t aarch64-linux-android -o ../jniLibs build --release
-          cargo ndk -t armv7-linux-androideabi -o ../jniLibs build --release
-          cargo ndk -t x86_64-linux-android -o ../jniLibs build --release
+          # Define target -> Android ABI mapping
+          declare -A ABIS=(
+            ["aarch64-linux-android"]="arm64-v8a"
+            ["armv7-linux-androideabi"]="armeabi-v7a"
+            ["x86_64-linux-android"]="x86_64"
+          )
 
-      - name: Copy .so files into Flutter project
-        run: |
-          mkdir -p ui/android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p ui/android/app/src/main/jniLibs/armeabi-v7a
-          mkdir -p ui/android/app/src/main/jniLibs/x86_64
-          cp jniLibs/aarch64-linux-android/release/libhumaid_core.so ui/android/app/src/main/jniLibs/arm64-v8a/
-          cp jniLibs/armv7-linux-androideabi/release/libhumaid_core.so ui/android/app/src/main/jniLibs/armeabi-v7a/
-          cp jniLibs/x86_64-linux-android/release/libhumaid_core.so ui/android/app/src/main/jniLibs/x86_64/
+          for target in "${!ABIS[@]}"; do
+            abi=${ABIS[$target]}
+            echo "Building for $target ($abi)..."
+            cargo ndk -t "$target" build --release
+
+            # Find the built library (it's in target/<target>/release/lib*.so)
+            lib_path=$(find "target/$target/release" -maxdepth 1 -name '*.so' -print -quit)
+            if [ -z "$lib_path" ]; then
+              echo "Error: No .so found for target $target"
+              exit 1
+            fi
+            echo "Found library: $lib_path"
+
+            # Place into Flutter's jniLibs
+            dest="../../../ui/android/app/src/main/jniLibs/$abi"
+            mkdir -p "$dest"
+            cp "$lib_path" "$dest/"
+            echo "Copied to $dest/"
+          done
 
       # ---------- Flutter APK ----------
       - name: Setup Flutter
