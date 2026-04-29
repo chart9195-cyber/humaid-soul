@@ -9,10 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # dart_pdf: ^3.10.0
-  # flutter_tts: ^3.8.0
-  # sqflite: ^2.3.0
-  # path_provider: ^2.1.0
+  ffi: ^2.1.0
+  path_provider: ^2.1.0
+  # Future: dart_pdf, flutter_tts, etc.
 
 dev_dependencies:
   flutter_test:
@@ -21,5 +20,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    # - assets/dictionaries/

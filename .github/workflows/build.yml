@@ -31,9 +31,9 @@ jobs:
     strategy:
       matrix:
         target:
-          - aarch64-linux-android      # modern 64‑bit ARM (most phones)
-          - armv7-linux-androideabi    # 32‑bit ARM (older devices)
-          - x86_64-linux-android       # 64‑bit x86 (emulators, some tablets)
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
@@ -42,17 +42,63 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
-      - name: Install Android NDK (needed by cargo-ndk)
-        run: |
-          echo "NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
       - name: Build library
         working-directory: core
-        run: |
-          cargo ndk -t ${{ matrix.target }} -o ../jniLibs build --release
+        run: cargo ndk -t ${{ matrix.target }} -o ../jniLibs build --release
       - name: Upload compiled .so
         uses: actions/upload-artifact@v4
         with:
           name: rust-libs-${{ matrix.target }}
           path: jniLibs/${{ matrix.target }}/release/libhumaid_core.so
+
+  build-flutter-apk:
+    needs: [build-dictionary, build-rust-core]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dictionary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: soul-dictionary
+          path: assets/
+
+      - name: Download Rust libs (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-libs-aarch64-linux-android
+          path: ui/android/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Download Rust libs (armv7)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-libs-armv7-linux-androideabi
+          path: ui/android/app/src/main/jniLibs/armeabi-v7a/
+
+      - name: Download Rust libs (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-libs-x86_64-linux-android
+          path: ui/android/app/src/main/jniLibs/x86_64/
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: stable
+
+      - name: Install Flutter dependencies
+        working-directory: ui
+        run: flutter pub get
+
+      - name: Build APK (debug)
+        working-directory: ui
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: humaid-soul-debug-apk
+          path: ui/build/app/outputs/flutter-apk/app-debug.apk

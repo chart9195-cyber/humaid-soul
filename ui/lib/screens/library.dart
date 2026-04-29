@@ -24,11 +24,10 @@ class LibraryScreen extends StatelessWidget {
           style: TextStyle(fontSize: 18, color: Colors.grey),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // Navigate to test reader (placeholder)
-        },
-        child: const Icon(Icons.menu_book),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => Navigator.pushNamed(context, '/test'),
+        label: const Text('Test Engine'),
+        icon: const Icon(Icons.search),
       ),
     );
   }

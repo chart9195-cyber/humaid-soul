@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/library.dart';
+import 'screens/test_lookup.dart';
 
 void main() {
   runApp(const HumaidSoulApp());
@@ -16,9 +17,12 @@ class HumaidSoulApp extends StatelessWidget {
         brightness: Brightness.dark,
         primaryColor: Colors.teal,
         scaffoldBackgroundColor: const Color(0xFF1E1E2E),
-        fontFamily: 'Roboto',
       ),
-      home: const LibraryScreen(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const LibraryScreen(),
+        '/test': (context) => const TestLookupScreen(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }
