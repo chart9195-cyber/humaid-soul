@@ -9,7 +9,6 @@ jobs:
   build-all:
     runs-on: ubuntu-latest
     steps:
-      # ---------- Checkout ----------
       - uses: actions/checkout@v4
 
       # ---------- Dictionary ----------
@@ -25,20 +24,28 @@ jobs:
         run: mkdir -p ui/assets && cp soul_dict.db.zst ui/assets/
 
       # ---------- Rust cross-compilation ----------
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-          override: true
+      - name: Install Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+
+      - name: Setup Android NDK
+        run: |
+          # Locate the pre-installed NDK on GitHub runner
+          ANDROID_NDK=$(ls $ANDROID_HOME/ndk/ | sort -r | head -1)
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK" >> $GITHUB_ENV
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
+
       - name: Build Rust library (all targets)
         working-directory: core
         run: |
           cargo ndk -t aarch64-linux-android -o ../jniLibs build --release
           cargo ndk -t armv7-linux-androideabi -o ../jniLibs build --release
           cargo ndk -t x86_64-linux-android -o ../jniLibs build --release
+
       - name: Copy .so files into Flutter project
         run: |
           mkdir -p ui/android/app/src/main/jniLibs/arm64-v8a
