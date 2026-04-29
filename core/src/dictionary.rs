@@ -2,11 +2,16 @@ use once_cell::sync::OnceCell;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::io::Read;
+use std::sync::Mutex;
 
-static DICTIONARY: OnceCell<Connection> = OnceCell::new();
+// Global dictionary connection protected by a mutex.
+static DICTIONARY: OnceCell<Mutex<Connection>> = OnceCell::new();
 
 /// Load the dictionary from a Zstandard‑compressed SQLite file.
+/// Decompresses the file, writes a temporary SQLite database,
+/// opens a connection, and stores it in the global dictionary.
 pub fn load_dictionary(path_zst: &str) -> bool {
+    // Read compressed file.
     let mut file = match std::fs::File::open(path_zst) {
         Ok(f) => f,
         Err(e) => {
@@ -20,7 +25,7 @@ pub fn load_dictionary(path_zst: &str) -> bool {
         return false;
     }
 
-    // Decompress using streaming decoder
+    // Decompress using streaming decoder.
     let mut decoder = match zstd::stream::Decoder::new(&compressed[..]) {
         Ok(d) => d,
         Err(e) => {
@@ -34,7 +39,7 @@ pub fn load_dictionary(path_zst: &str) -> bool {
         return false;
     }
 
-    // Write to a temporary file (Android‑friendly /tmp)
+    // Write temporary file (Android's /tmp is writable).
     let temp_path = "/tmp/soul_dict_temp.db";
     if std::fs::write(temp_path, &decompressed).is_err() {
         return false;
@@ -48,9 +53,10 @@ pub fn load_dictionary(path_zst: &str) -> bool {
         }
     };
 
+    // Enable WAL mode for concurrent reads (not strictly needed with Mutex but harmless).
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
-    DICTIONARY.set(conn).is_ok()
+    DICTIONARY.set(Mutex::new(conn)).is_ok()
 }
 
 #[derive(Serialize)]
@@ -63,10 +69,11 @@ struct WordEntry {
 
 /// Look up a word: direct match → lemma → fuzzy fallback.
 pub fn lookup(word: &str) -> String {
-    let conn = match DICTIONARY.get() {
-        Some(c) => c,
+    let guard = match DICTIONARY.get() {
+        Some(m) => m.lock().unwrap(),
         None => return "[]".to_string(),
     };
+    let conn = &*guard;
 
     if let Some(entry) = direct_lookup(conn, word) {
         return serde_json::to_string(&entry).unwrap_or_default();
@@ -91,25 +98,25 @@ pub fn lookup(word: &str) -> String {
 
 /// Return the lemma (base form) of a given word.
 pub fn lemmatize(word: &str) -> String {
-    let conn = match DICTIONARY.get() {
-        Some(c) => c,
+    let guard = match DICTIONARY.get() {
+        Some(m) => m.lock().unwrap(),
         None => return word.to_string(),
     };
-    lemmatize_impl(conn, word)
+    lemmatize_impl(&*guard, word)
 }
 
 /// Fuzzy search: returns up to `max_results` closest matches.
 pub fn fuzzy_search(word: &str, max_results: usize) -> String {
-    let conn = match DICTIONARY.get() {
-        Some(c) => c,
+    let guard = match DICTIONARY.get() {
+        Some(m) => m.lock().unwrap(),
         None => return "[]".to_string(),
     };
-    let matches = fuzzy_impl(conn, word, max_results);
+    let matches = fuzzy_impl(&*guard, word, max_results);
     serde_json::to_string(&matches).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal helpers (expect a concrete &Connection)
 // ---------------------------------------------------------------------------
 
 fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
@@ -167,7 +174,6 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
-    // Use the high‑level query_row directly – no mutable Statement needed.
     match conn.query_row(
         "SELECT lemma FROM lemma_map WHERE inflected = ?1",
         params![word],
