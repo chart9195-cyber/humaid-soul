@@ -1,32 +1,22 @@
 #!/usr/bin/env python3
 """
-HUMAID SOUL – Reliable Dictionary Builder
+HUMAID SOUL – Reliable Dictionary Builder (v2)
 
-Downloads WordNet 3.1 database files directly, parses them,
-and creates soul_dict.db with:
-  words(word, word_type)
-  definitions(word_id, definition)
-  synonyms(word_id, synonym)
-  lemma_map(inflected, lemma) – basic irregulars
+Downloads the WordNet 3.1 database files from Princeton's official site,
+parses them, and creates soul_dict.db.
 """
 
 import sqlite3
 import os
 import urllib.request
-import shutil
+import tarfile
 import sys
+import shutil
 
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
-WORDNET_URL = "https://github.com/globalwordnet/english-wordnet/raw/refs/heads/main/src/wn31/"
-FILES = {
-    "data.noun": "noun",
-    "data.verb": "verb",
-    "data.adj": "adj",
-    "data.adv": "adv",
-}
-
+WORDNET_URL = "https://wordnetcode.princeton.edu/wn3.1.dict.tar.gz"
 DB_PATH = "soul_dict.db"
 
 # ------------------------------------------------------------
@@ -60,7 +50,6 @@ CREATE TABLE lemma_map (
 ) WITHOUT ROWID;
 """
 
-# Common irregular forms (English) – just enough to get started
 IRREGULARS = {
     "children": "child", "went": "go", "better": "good", "best": "good",
     "ran": "run", "running": "run", "took": "take", "taken": "take",
@@ -72,69 +61,63 @@ IRREGULARS = {
 }
 
 # ------------------------------------------------------------
-# PARSERS
+# DOWNLOAD & EXTRACT
 # ------------------------------------------------------------
-def download_file(url, dest):
-    print(f"  Downloading {url} ...")
-    try:
-        urllib.request.urlretrieve(url, dest)
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        sys.exit(1)
+def download_and_extract(url, dest_dir):
+    print(f"Downloading WordNet database from {url}...")
+    tar_path = os.path.join(dest_dir, "wn3.1.dict.tar.gz")
+    urllib.request.urlretrieve(url, tar_path)
+    print("Extracting...")
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(dest_dir)
+    os.remove(tar_path)
 
+# ------------------------------------------------------------
+# PARSER
+# ------------------------------------------------------------
 def parse_wordnet_file(filepath, pos):
     """
-    Parse WordNet data file.
-    Each line starting with a synset offset.
-    Format: offset  lex_filenum  ss_type  w_cnt  words  ...  |  gloss
-    We'll extract: words (lemma), synonyms, and definition (after |).
+    Each line example:
+    00001740 03 n 01 entity 0 006 @ 00002098 n 0000 ~ 02153675 n 0000 | that which is perceived...
+    We need the words (lemma), definition (gloss after '|'), and synonyms (all lemmas in line).
     """
-    data = []
+    entries = []
     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith(" "):
                 continue
-            # Split at gloss separator
             parts = line.split(" | ")
             if len(parts) < 2:
-                gloss = ""
-                meta = parts[0]
-            else:
-                meta = parts[0]
-                gloss = parts[1]
-
-            # Parse meta part
-            fields = meta.split()
-            if len(fields) < 6:
                 continue
-            synset_offset = fields[0]
-            lex_filenum = fields[1]
-            ss_type = fields[2]
-            w_cnt = int(fields[3], 16)  # hex word count
-            # Next w_cnt fields are words (space separated)
-            idx = 4
+            gloss = parts[1].strip('" ;')
+            meta = parts[0].split()
+            if len(meta) < 6:
+                continue
+            # w_cnt is hex at index 3
+            try:
+                w_cnt = int(meta[3], 16)
+            except ValueError:
+                continue
             words = []
+            idx = 4
             for _ in range(w_cnt):
-                if idx >= len(fields):
+                if idx >= len(meta):
                     break
-                word = fields[idx]
-                # Word may be followed by lex_id
-                # Remove _suffix if any (e.g., "lemma%1")
-                lemma = word.split("%")[0] if "%" in word else word
+                raw_word = meta[idx]
+                # Format: lemma%lex_id (e.g., entity%0)
+                lemma = raw_word.split("%")[0]
                 words.append(lemma)
                 idx += 1
-
+                # Skip optional lex_id after word? Actually meta[idx] is next word or other fields.
             if not words:
                 continue
-
-            data.append({
+            entries.append({
                 "words": words,
-                "definition": gloss.strip('" ').split(";")[0].strip(),
+                "definition": gloss,
                 "pos": pos,
-                "synonyms": words,  # all words in synset are synonyms
             })
-    return data
+    return entries
 
 # ------------------------------------------------------------
 # DATABASE BUILD
@@ -146,67 +129,68 @@ def build_database():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
 
-    # Insert irregular lemma mappings
-    for inflected, lemma in IRREGULARS.items():
-        conn.execute(
-            "INSERT OR IGNORE INTO lemma_map(inflected, lemma) VALUES (?, ?)",
-            (inflected, lemma)
-        )
+    # Insert irregulars
+    for inf, lem in IRREGULARS.items():
+        conn.execute("INSERT OR IGNORE INTO lemma_map(inflected, lemma) VALUES (?,?)", (inf, lem))
     print(f"Inserted {len(IRREGULARS)} irregular lemma mappings.")
 
-    # Download & parse each file
     temp_dir = "/tmp/wordnet_build"
-    os.makedirs(temp_dir, exist_ok=True)
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir)
 
-    word_id_cache = {}  # word -> id
-    for fname, pos in FILES.items():
-        print(f"Processing {fname} ({pos})...")
-        local_path = os.path.join(temp_dir, fname)
-        download_file(WORDNET_URL + fname, local_path)
-        entries = parse_wordnet_file(local_path, pos)
-        print(f"  Found {len(entries)} synsets.")
+    download_and_extract(WORDNET_URL, temp_dir)
+    dict_dir = os.path.join(temp_dir, "dict")
+    if not os.path.isdir(dict_dir):
+        print("Error: dict directory not found after extraction.")
+        sys.exit(1)
 
-        for entry in entries:
+    files = {
+        "data.noun": "noun",
+        "data.verb": "verb",
+        "data.adj": "adj",
+        "data.adv": "adv",
+    }
+
+    word_id_cache = {}
+    for fname, pos in files.items():
+        fpath = os.path.join(dict_dir, fname)
+        if not os.path.exists(fpath):
+            print(f"Warning: {fpath} missing, skipping.")
+            continue
+        print(f"Parsing {fname} ({pos})...")
+        synsets = parse_wordnet_file(fpath, pos)
+        print(f"  Found {len(synsets)} synsets.")
+        for syn in synsets:
             # Insert words
-            word_ids = []
-            for lemma in entry["words"]:
+            wids = []
+            for lemma in syn["words"]:
                 if lemma not in word_id_cache:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO words(word, word_type) VALUES (?, ?)",
-                        (lemma, pos)
-                    )
-                    c = conn.execute("SELECT id FROM words WHERE word=?", (lemma,))
-                    row = c.fetchone()
+                    conn.execute("INSERT OR IGNORE INTO words(word, word_type) VALUES (?,?)", (lemma, pos))
+                    cur = conn.execute("SELECT id FROM words WHERE word=?", (lemma,))
+                    row = cur.fetchone()
                     if row:
                         word_id_cache[lemma] = row[0]
                     else:
+                        # duplicate somehow? should not happen
                         continue
-                word_ids.append(word_id_cache[lemma])
-
-            # Insert definition
-            if entry["definition"]:
-                for wid in word_ids:
-                    conn.execute(
-                        "INSERT INTO definitions(word_id, definition) VALUES (?, ?)",
-                        (wid, entry["definition"])
-                    )
-
-            # Insert synonyms (all words in synset)
-            if len(word_ids) > 1:
-                for wid in word_ids:
-                    for other_lemma, other_wid in zip(entry["words"], word_ids):
-                        if other_wid != wid:
-                            conn.execute(
-                                "INSERT OR IGNORE INTO synonyms(word_id, synonym) VALUES (?, ?)",
-                                (wid, entry["words"][word_ids.index(other_wid)])
-                            )
-
+                wids.append(word_id_cache[lemma])
+            # Insert definition for each word
+            if syn["definition"]:
+                for wid in wids:
+                    conn.execute("INSERT OR IGNORE INTO definitions(word_id, definition) VALUES (?,?)",
+                                (wid, syn["definition"]))
+            # Synonyms: all other words in the same synset
+            for i, wid in enumerate(wids):
+                for j, other_lemma in enumerate(syn["words"]):
+                    if j != i:
+                        conn.execute("INSERT OR IGNORE INTO synonyms(word_id, synonym) VALUES (?,?)",
+                                    (wid, other_lemma))
         conn.commit()
 
-    # Cleanup temporary files
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    shutil.rmtree(temp_dir)
     conn.close()
-    print(f"Dictionary built successfully: {DB_PATH}")
+    print(f"Dictionary built: {DB_PATH}")
     print(f"Total unique words: {len(word_id_cache)}")
 
 if __name__ == "__main__":
