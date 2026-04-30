@@ -30,24 +30,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  Future<void> _onTap(int pageNumber, Offset pageOffset) async {
+  // Convert widget‑level tap position to PDF page coordinates
+  void _onViewerTap(Offset globalOffset) async {
     if (_controller == null) return;
 
-    try {
-      // Get the document from the viewer controller
-      final doc = _controller!.document;
-      if (doc == null) return;
+    // Map the global offset to the page coordinate using the controller
+    final hit = await _controller!.fromWidgetOffset(globalOffset);
+    if (hit == null || hit.pageNumber == null) return;
 
-      // Obtain the text layer for the tapped page (async)
-      final pageText = await doc.getText(pageNumber);
-      if (pageText == null) return;
+    final int pageNum = hit.pageNumber!;
+    final Offset pageOffset = hit.pageOffset;
 
-      final word = pageText.wordAt(pageOffset);
-      if (word != null && word.isNotEmpty) {
-        _fetchDefinition(word, pageOffset);
-      }
-    } catch (e) {
-      print("Tap error: $e");
+    // Load the text layer for the tapped page
+    final doc = _controller!.document;
+    if (doc == null) return;
+
+    final page = await doc.getPage(pageNum);
+    if (page == null) return;
+
+    final pageText = await page.loadText();
+    if (pageText == null) return;
+
+    final word = pageText.wordAt(pageOffset);
+    if (word != null && word.isNotEmpty) {
+      _fetchDefinition(word, pageOffset);
     }
   }
 
@@ -117,17 +123,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Reader')),
       body: GestureDetector(
-        onTap: _dismissHUD,
+        onTapUp: (details) => _onViewerTap(details.globalPosition),
         child: Stack(
           children: [
             PdfViewer.file(
               widget.pdfPath,
-              viewerParams: PdfViewerParams(
+              params: PdfViewerParams(
                 onViewerReady: (controller, _) {
                   _controller = controller;
-                },
-                onTap: (pageNumber, offset) {
-                  _onTap(pageNumber, offset);
                 },
               ),
             ),
@@ -149,7 +152,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
-      onTap: () {},
+      onTap: () {}, // prevent parent tap from dismissing
       child: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(14),
