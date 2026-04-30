@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:pdfrx/pdfrx.dart';
 import '../core_bridge.dart';
+import '../widgets/custom_pdf_viewer.dart';
 import 'dart:convert';
-import 'dart:math';
 
 class ReaderScreen extends StatefulWidget {
   final String pdfPath;
@@ -18,10 +17,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
 
-  PdfDocument? _document;
-  PdfViewerController? _controller;
-  final GlobalKey _viewerKey = GlobalKey();
-
   @override
   void initState() {
     super.initState();
@@ -34,57 +29,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  // ----------- TAP → PDF COORDINATE MAPPING (transformation‑based) -----------
-
-  Future<void> _onViewerTap(Offset globalPosition) async {
-    if (_document == null || _controller == null) return;
-
-    // 1. Local widget coordinates
-    final RenderBox? box =
-        _viewerKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final local = box.globalToLocal(globalPosition);
-
-    // 2. Use the viewer's transformation to map local → PDF page coordinates
-    final Matrix4 transform = _controller!.transformation;
-    // The inverse may fail if the matrix is singular; guard it.
-    Matrix4 inverse;
-    try {
-      inverse = Matrix4.inverted(transform);
-    } catch (_) {
-      return;
-    }
-
-    // Transform local offset into PDF coordinate space
-    final Vector4 pdfPoint = inverse.transform(Vector4(local.dx, local.dy, 0, 1));
-    final Offset pageOffset = Offset(pdfPoint.x, pdfPoint.y);
-
-    // 3. Determine current page (use default 1 if null)
-    final int pageNumber = _controller!.pageNumber ?? 1;
-    if (pageNumber < 1 || pageNumber > _document!.pages.length) return;
-
-    // 4. Load text layer for the page
-    final page = _document!.pages[pageNumber - 1];
-    final PdfPageText? pageText = await page.loadText();
-    if (pageText == null) return;
-
-    // 5. Hit‑test every word (safe, uses only the stable `words` list)
-    String? word;
-    for (final w in pageText.words) {
-      if (w.rect.contains(pageOffset)) {
-        word = w.text;
-        break;
-      }
-    }
-
-    if (word != null && word.isNotEmpty) {
-      _fetchDefinition(word, pageOffset);
-    }
-  }
-
-  // ----------- DEFINITION FETCH & HUD -----------
-
-  void _fetchDefinition(String word, Offset tapPos) {
+  void _onWordTap(String word, Offset tapPosition) {
     String jsonStr;
     try {
       jsonStr = _bridge.lookup(word);
@@ -92,19 +37,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _showError('Lookup failed');
       return;
     }
-
     if (jsonStr == '[]') {
       _showError('No definition found');
       return;
     }
-
     try {
       final parsed = jsonDecode(jsonStr);
       if (parsed is Map<String, dynamic>) {
         setState(() {
           _tappedWord = word;
           _entry = parsed;
-          _hudPosition = _bestHudPosition(tapPos);
+          _hudPosition = _bestHudPosition(tapPosition);
         });
       }
     } catch (e) {
@@ -142,25 +85,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     });
   }
 
-  // ----------- BUILD -----------
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Reader')),
       body: GestureDetector(
-        onTapUp: (details) => _onViewerTap(details.globalPosition),
+        onTap: _dismissHUD,
         child: Stack(
-          key: _viewerKey,
           children: [
-            PdfViewer.file(
-              widget.pdfPath,
-              params: PdfViewerParams(
-                onViewerReady: (document, controller) {
-                  _document = document;
-                  _controller = controller;
-                },
-              ),
+            CustomPdfViewer(
+              filePath: widget.pdfPath,
+              onWordTap: _onWordTap,
             ),
             if (_tappedWord != null && _entry != null && _hudPosition != null)
               Positioned(
