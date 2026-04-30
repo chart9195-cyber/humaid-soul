@@ -17,38 +17,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Map<String, dynamic>? _entry;
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
-  bool _engineReady = false;
-  bool _engineLoading = true;
-  String? _engineError;
+  bool _wordMapLoading = true;
+  DateTime _lastTapTime = DateTime(2000);
 
   @override
   void initState() {
     super.initState();
-    _initEngine();
+    _bridge.load();
   }
 
-  Future<void> _initEngine() async {
-    try {
-      final ok = await _bridge.load();
-      setState(() {
-        _engineReady = ok;
-        _engineLoading = false;
-        _engineError = ok ? null : 'Dictionary engine failed to load.';
-      });
-    } catch (e) {
-      setState(() {
-        _engineReady = false;
-        _engineLoading = false;
-        _engineError = 'Engine error: $e';
-      });
-    }
+  void _onWordMapReady() {
+    setState(() => _wordMapLoading = false);
   }
 
-  void _onWordTap(String word, Offset tapPosition) {
-    if (!_engineReady) {
+  void _onWordTap(String word, Offset localPosition) {
+    final now = DateTime.now();
+    if (now.difference(_lastTapTime).inMilliseconds < 200) return;
+    _lastTapTime = now;
+
+    if (_bridge.state != EngineState.ready) {
       _showError('Engine not ready');
       return;
     }
+
     String jsonStr;
     try {
       jsonStr = _bridge.lookup(word);
@@ -66,7 +57,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         setState(() {
           _tappedWord = word;
           _entry = parsed;
-          _hudPosition = _bestHudPosition(tapPosition);
+          _hudPosition = _bestHudPosition(localPosition);
         });
       }
     } catch (e) {
@@ -114,31 +105,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
       appBar: AppBar(title: const Text('Reader')),
       body: Stack(
         children: [
-          if (_engineLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (!_engineReady)
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_engineError ?? 'Engine not available',
-                      style: const TextStyle(color: Colors.redAccent)),
-                  const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() => _engineLoading = true);
-                      _initEngine();
-                    },
-                    child: const Text('Retry'),
+          CustomPdfViewer(
+            filePath: widget.pdfPath,
+            onWordTap: _onWordTap,
+            onNoText: _onNoText,
+            onWordMapReady: _onWordMapReady,
+          ),
+          if (_wordMapLoading)
+            const Positioned(
+              top: 80, left: 0, right: 0,
+              child: Center(
+                child: Card(
+                  color: Colors.black54,
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Indexing words...',
+                        style: TextStyle(color: Colors.white70)),
                   ),
-                ],
+                ),
               ),
-            )
-          else
-            CustomPdfViewer(
-              filePath: widget.pdfPath,
-              onWordTap: _onWordTap,
-              onNoText: _onNoText,
             ),
           if (_tappedWord != null && _entry != null && _hudPosition != null)
             Positioned(

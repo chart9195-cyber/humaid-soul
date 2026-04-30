@@ -28,8 +28,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final list = jsonDecode(await file.readAsString()) as List;
       setState(() {
         _documents = list.cast<String>();
+        _removeDeadEntries();
       });
     }
+  }
+
+  void _removeDeadEntries() {
+    _documents.removeWhere((path) => !File(path).existsSync());
+    _saveLibrary();
   }
 
   Future<void> _saveLibrary() async {
@@ -53,6 +59,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _openDocument(String path) {
+    if (!File(path).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('File no longer exists.')),
+      );
+      _removeDeadEntries();
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ReaderScreen(pdfPath: path)),

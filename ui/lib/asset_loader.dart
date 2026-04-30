@@ -3,23 +3,24 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AssetLoader {
-  /// Copies the dictionary asset from APK to app documents folder.
-  /// Returns the path to the writable file, or null on failure.
   static Future<String?> copyDictionaryToLocal() async {
     const assetPath = 'assets/soul_dict.db.zst';
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/soul_dict.db.zst');
 
-    // If already copied and size > 0, return path.
+    // Get asset size to validate copy
+    final assetData = await rootBundle.load(assetPath);
+    final assetBytes = assetData.buffer.asUint8List();
+
     if (await file.exists()) {
-      final length = await file.length();
-      if (length > 0) return file.path;
+      final existingBytes = await file.readAsBytes();
+      if (existingBytes.length == assetBytes.length) {
+        return file.path; // already correct
+      }
     }
 
     try {
-      final data = await rootBundle.load(assetPath);
-      final bytes = data.buffer.asUint8List();
-      await file.writeAsBytes(bytes);
+      await file.writeAsBytes(assetBytes);
       return file.path;
     } catch (e) {
       print("Asset copy failed: $e");

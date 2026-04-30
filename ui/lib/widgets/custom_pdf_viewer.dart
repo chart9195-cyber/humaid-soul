@@ -1,21 +1,20 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
-/// Custom PDF viewer that pre‑computes a word map (word + bounds per page)
-/// using syncfusion_flutter_pdf, then hit‑tests on tap.
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
   final void Function(String word, Offset localPosition)? onWordTap;
   final void Function()? onNoText;
+  final VoidCallback? onWordMapReady;
 
   const CustomPdfViewer({
     super.key,
     required this.filePath,
     this.onWordTap,
     this.onNoText,
+    this.onWordMapReady,
   });
 
   @override
@@ -23,7 +22,6 @@ class CustomPdfViewer extends StatefulWidget {
 }
 
 class _CustomPdfViewerState extends State<CustomPdfViewer> {
-  // wordMap[pageIndex 0‑based] = list of (word, bounds‑in‑PDF‑coords)
   List<List<WordEntry>> _wordMap = [];
   bool _wordMapReady = false;
 
@@ -40,10 +38,8 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
       final extractor = sf_pdf.PdfTextExtractor(doc);
       final lines = extractor.extractTextLines();
 
-      // Group lines by page index
       for (final line in lines) {
         final pageIdx = line.pageIndex;
-        // Expand list as needed
         while (_wordMap.length <= pageIdx) {
           _wordMap.add([]);
         }
@@ -56,30 +52,26 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
       }
       doc.dispose();
       _wordMapReady = true;
+      widget.onWordMapReady?.call();
     } catch (e) {
       debugPrint('Word map build failed: $e');
-      _wordMapReady = false;
+      _wordMapReady = true; // allow interaction even if empty
+      widget.onWordMapReady?.call();
     }
   }
 
   void _onTap(PdfGestureDetails details) {
-    if (!_wordMapReady) {
-      // Word map not ready yet → try fallback: tap gesture but no text extraction
-      // still fire with empty word so UI can show "loading" state
-      return;
-    }
+    if (!_wordMapReady) return;
 
     final pageNumber = details.pageNumber;
     if (pageNumber == null || pageNumber < 1) return;
 
-    // Syncfusion pages are 1‑based; our wordMap is 0‑based
     final pageIdx = pageNumber - 1;
     if (pageIdx >= _wordMap.length) return;
 
     final pageOffset = details.pagePosition;
     if (pageOffset == null) return;
 
-    // Hit‑test words on this page
     for (final entry in _wordMap[pageIdx]) {
       if (entry.bounds.contains(pageOffset)) {
         final word = entry.text.trim();
@@ -90,8 +82,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
         return;
       }
     }
-
-    // Tap position didn't hit any word (e.g., empty space, image)
     widget.onNoText?.call();
   }
 
