@@ -17,27 +17,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Cache NLTK data
         uses: actions/cache@v4
         with:
           path: ~/nltk_data
           key: nltk-${{ runner.os }}-${{ hashFiles('scripts/build_dictionary.py') }}
           restore-keys: nltk-${{ runner.os }}-
-
       - name: Build dictionary
         run: python scripts/build_dictionary.py
-
       - name: Verify dictionary exists
         run: |
           if [ ! -f soul_dict.db ]; then echo "ERROR: soul_dict.db not found"; exit 1; fi
           size=$(stat -c%s soul_dict.db 2>/dev/null || echo 0)
-          echo "soul_dict.db size: $size bytes"
           if [ "$size" -lt 1000 ]; then echo "ERROR: dictionary too small"; exit 1; fi
-
       - name: Compress dictionary
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
-
       - name: Copy dictionary to Flutter assets
         run: mkdir -p ui/assets && cp soul_dict.db.zst ui/assets/
 
@@ -51,21 +45,17 @@ jobs:
             core/target
           key: rust-${{ runner.os }}-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
-
       - name: Install Android targets
         run: |
           rustup target add aarch64-linux-android
           rustup target add armv7-linux-androideabi
           rustup target add x86_64-linux-android
-
       - name: Setup Android NDK
         run: |
           ANDROID_NDK=$(ls $ANDROID_HOME/ndk/ | sort -r | head -1)
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK" >> $GITHUB_ENV
-
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
-
       - name: Build and copy Rust libraries
         working-directory: core
         run: |
@@ -76,13 +66,9 @@ jobs:
           )
           for target in "${!ABIS[@]}"; do
             abi=${ABIS[$target]}
-            echo "Building for $target ($abi)..."
             cargo ndk -t "$target" build --release
             lib_path=$(find "target/$target/release" -maxdepth 1 -name '*.so' -print -quit)
-            if [ -z "$lib_path" ]; then
-              echo "Error: No .so found for $target"
-              exit 1
-            fi
+            [ -z "$lib_path" ] && echo "Error: No .so for $target" && exit 1
             dest="../../../ui/android/app/src/main/jniLibs/$abi"
             mkdir -p "$dest"
             cp "$lib_path" "$dest/"
@@ -95,14 +81,12 @@ jobs:
           path: ~/.pub-cache
           key: flutter-${{ runner.os }}-${{ hashFiles('ui/pubspec.yaml') }}
           restore-keys: flutter-${{ runner.os }}-
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: stable
-
-      - name: Generate Android project files (if missing)
+      - name: Generate Android project and patch SDK
         run: |
           if [ ! -d "ui/android" ]; then
             TEMP_DIR=$(mktemp -d)
@@ -112,23 +96,30 @@ jobs:
             cp -r "$TEMP_DIR/temp_app/android" ui/
             rm -rf "$TEMP_DIR"
           fi
-
+          # Bump minSdkVersion to 21 for Syncfusion compatibility
+          sed -i 's/minSdkVersion .*/minSdkVersion 21/' ui/android/app/build.gradle
+          # Ensure compileSdkVersion is at least 33
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 33/' ui/android/app/build.gradle
+          # Add ProGuard rules to keep Syncfusion classes
+          mkdir -p ui/android/app/proguard
+          echo "-keep class com.syncfusion.** { *; }" > ui/android/app/proguard/proguard-rules.pro
+          echo "-dontwarn com.syncfusion.**" >> ui/android/app/proguard/proguard-rules.pro
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
-
       - name: Build debug APK
         working-directory: ui
         run: flutter build apk --debug
 
       # ---------- Upload artifacts ----------
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: humaid-soul-debug-apk
           path: ui/build/app/outputs/flutter-apk/app-debug.apk
-
       - name: Upload dictionary artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: soul-dictionary
@@ -136,7 +127,7 @@ jobs:
 
       # ---------- Release (on tag) ----------
       - name: Create Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && success()
         uses: softprops/action-gh-release@v1
         with:
           files: |

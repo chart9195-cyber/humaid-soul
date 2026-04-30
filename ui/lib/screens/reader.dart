@@ -17,6 +17,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Map<String, dynamic>? _entry;
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
+  bool _engineReady = false;
+  bool _engineLoading = true;
+  String? _engineError;
 
   @override
   void initState() {
@@ -25,12 +28,27 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _initEngine() async {
-    if (!_bridge.isLoaded) {
-      await _bridge.load();
+    try {
+      final ok = await _bridge.load();
+      setState(() {
+        _engineReady = ok;
+        _engineLoading = false;
+        _engineError = ok ? null : 'Dictionary engine failed to load.';
+      });
+    } catch (e) {
+      setState(() {
+        _engineReady = false;
+        _engineLoading = false;
+        _engineError = 'Engine error: $e';
+      });
     }
   }
 
   void _onWordTap(String word, Offset tapPosition) {
+    if (!_engineReady) {
+      _showError('Engine not ready');
+      return;
+    }
     String jsonStr;
     try {
       jsonStr = _bridge.lookup(word);
@@ -54,6 +72,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
     } catch (e) {
       _showError('Parse error');
     }
+  }
+
+  void _onNoText() {
+    _showError('No text layer (scanned PDF?)');
   }
 
   void _showError(String msg) {
@@ -90,34 +112,52 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Reader')),
-      body: GestureDetector(
-        onTap: _dismissHUD,
-        child: Stack(
-          children: [
+      body: Stack(
+        children: [
+          if (_engineLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (!_engineReady)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_engineError ?? 'Engine not available',
+                      style: const TextStyle(color: Colors.redAccent)),
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() => _engineLoading = true);
+                      _initEngine();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          else
             CustomPdfViewer(
               filePath: widget.pdfPath,
               onWordTap: _onWordTap,
+              onNoText: _onNoText,
             ),
-            if (_tappedWord != null && _entry != null && _hudPosition != null)
-              Positioned(
-                left: _hudPosition!.dx,
-                top: _hudPosition!.dy,
-                child: _buildHUD(),
-              ),
-          ],
-        ),
+          if (_tappedWord != null && _entry != null && _hudPosition != null)
+            Positioned(
+              left: _hudPosition!.dx,
+              top: _hudPosition!.dy,
+              child: _buildHUD(),
+            ),
+        ],
       ),
     );
   }
 
   Widget _buildHUD() {
     final wordType = _entry!['word_type'] ?? '';
-    final definitions =
-        (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
-      onTap: () {},
+      onTap: _dismissHUD,
       child: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(14),
@@ -141,14 +181,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     ),
                     if (wordType.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                             color: Colors.teal[800],
                             borderRadius: BorderRadius.circular(4)),
                         child: Text(wordType,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12)),
+                            style: const TextStyle(color: Colors.white, fontSize: 12)),
                       ),
                     IconButton(
                       icon: const Icon(Icons.bookmark_border,
@@ -164,8 +202,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ...definitions.take(3).map((d) => Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text('• $d',
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 14)),
+                            style: const TextStyle(color: Colors.white, fontSize: 14)),
                       )),
                 if (definitions.isEmpty)
                   const Text('No definition found.',
@@ -176,12 +213,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     spacing: 6,
                     runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
-                          label:
-                              Text(s, style: const TextStyle(fontSize: 11)),
+                          label: Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
                           labelStyle: const TextStyle(color: Colors.white),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
                         )).toList(),
                   ),
