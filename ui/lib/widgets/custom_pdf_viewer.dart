@@ -6,6 +6,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
   final void Function(String word, Offset localPosition)? onWordTap;
+  final void Function(String word, Offset localPosition)? onWordLongPress;
   final void Function()? onNoText;
   final void Function()? onWordMapReady;
 
@@ -13,6 +14,7 @@ class CustomPdfViewer extends StatefulWidget {
     super.key,
     required this.filePath,
     this.onWordTap,
+    this.onWordLongPress,
     this.onNoText,
     this.onWordMapReady,
   });
@@ -60,7 +62,15 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
-  void _onTap(PdfGestureDetails details) {
+  void _handleTap(PdfGestureDetails details) {
+    _extractWord(details, isLongPress: false);
+  }
+
+  void _handleLongPress(PdfGestureDetails details) {
+    _extractWord(details, isLongPress: true);
+  }
+
+  void _extractWord(PdfGestureDetails details, {required bool isLongPress}) {
     if (!_wordMapReady) return;
 
     final pageNumber = details.pageNumber;
@@ -77,7 +87,11 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
         final word = entry.text.trim();
         if (word.isNotEmpty) {
           final widgetPosition = details.position;
-          widget.onWordTap?.call(word, widgetPosition);
+          if (isLongPress) {
+            widget.onWordLongPress?.call(word, widgetPosition);
+          } else {
+            widget.onWordTap?.call(word, widgetPosition);
+          }
         }
         return;
       }
@@ -89,7 +103,8 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   Widget build(BuildContext context) {
     return SfPdfViewer.file(
       File(widget.filePath),
-      onTap: _onTap,
+      onTap: _handleTap,
+      onLongPress: _handleLongPress,
     );
   }
 }
