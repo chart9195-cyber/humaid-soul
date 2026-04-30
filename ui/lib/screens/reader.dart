@@ -52,10 +52,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _restorePosition() async {
-    final value = await ReadingPosition.get(widget.pdfPath);
-    if (value != null) {
-      final page = (value is int) ? value : value.toInt();
-      if (page > 0) setState(() => _initialPage = page);
+    final page = await ReadingPosition.get(widget.pdfPath);
+    if (page != null && page > 0) {
+      setState(() => _initialPage = page);
     }
   }
 
@@ -75,13 +74,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final totalPages = state.wordMap.length;
       if (totalPages > 0) {
         final page = (fraction * (totalPages - 1)).round() + 1;
-        await ReadingPosition.save(widget.pdfPath, page.toDouble());
+        await ReadingPosition.save(widget.pdfPath, page);
       }
     }
   }
 
-  // … rest of methods unchanged …
-  // (keep all existing logic from previous reader.dart)
   void _onWordTap(String word, Offset localPosition) {
     final now = DateTime.now();
     if (now.difference(_lastTapTime).inMilliseconds < 200) return;

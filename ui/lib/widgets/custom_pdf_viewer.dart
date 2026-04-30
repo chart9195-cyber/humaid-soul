@@ -5,7 +5,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
-  final int initialPage;
+  final int initialPage; // 1‑based
   final void Function(String word, Offset localPosition)? onWordTap;
   final void Function()? onNoText;
   final void Function()? onWordMapReady;
@@ -36,8 +36,6 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
   List<List<WordEntry>> get wordMap => _wordMap;
   bool get isWordMapReady => _wordMapReady;
 
-  // … buildWordMap, hitTest, widgetToPdf, onTap, onLongPress unchanged …
-  // (keeping the full implementation below)
   @override
   void initState() {
     super.initState();
@@ -151,8 +149,12 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
           return SfPdfViewer.file(
             File(widget.filePath),
             controller: _controller,
-            initialPage: widget.initialPage,
             onTap: _onTap,
+            onViewerReady: (details) {
+              if (widget.initialPage > 1) {
+                _controller.jumpToPage(widget.initialPage);
+              }
+            },
           );
         },
       ),
