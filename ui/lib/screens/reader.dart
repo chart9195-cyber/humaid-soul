@@ -16,7 +16,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Map<String, dynamic>? _entry;
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
+
+  PdfDocument? _document;
   PdfViewerController? _controller;
+  final GlobalKey _viewerKey = GlobalKey();
 
   @override
   void initState() {
@@ -30,24 +33,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  // Convert widget‑level tap position to PDF page coordinates
-  void _onViewerTap(Offset globalOffset) async {
-    if (_controller == null) return;
+  Future<void> _onViewerTap(Offset globalPosition) async {
+    if (_document == null || _controller == null) return;
 
-    // Map the global offset to the page coordinate using the controller
-    final hit = await _controller!.fromWidgetOffset(globalOffset);
-    if (hit == null || hit.pageNumber == null) return;
+    // Convert global tap position to local widget coordinates
+    final RenderBox? box =
+        _viewerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
 
-    final int pageNum = hit.pageNumber!;
-    final Offset pageOffset = hit.pageOffset;
+    final localPosition = box.globalToLocal(globalPosition);
 
-    // Load the text layer for the tapped page
-    final doc = _controller!.document;
-    if (doc == null) return;
+    // Get the current visible page number
+    final pageNumber = _controller!.pageNumber;
+    if (pageNumber < 1 || pageNumber > _document!.pages.length) return;
 
-    final page = await doc.getPage(pageNum);
-    if (page == null) return;
+    // Convert the local widget coordinates to PDF page coordinates
+    final pageOffset = _controller!.toPageOffset(localPosition);
 
+    // Load text layer for the current page
+    final page = _document!.pages[pageNumber - 1];
     final pageText = await page.loadText();
     if (pageText == null) return;
 
@@ -125,11 +129,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
       body: GestureDetector(
         onTapUp: (details) => _onViewerTap(details.globalPosition),
         child: Stack(
+          key: _viewerKey,
           children: [
             PdfViewer.file(
               widget.pdfPath,
               params: PdfViewerParams(
-                onViewerReady: (controller, _) {
+                onViewerReady: (document, controller) {
+                  _document = document;
                   _controller = controller;
                 },
               ),
@@ -148,11 +154,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Widget _buildHUD() {
     final wordType = _entry!['word_type'] ?? '';
-    final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final definitions =
+        (_entry!['definitions'] as List?)?.cast<String>() ?? [];
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
-      onTap: () {}, // prevent parent tap from dismissing
+      onTap: () {},
       child: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(14),
@@ -179,19 +186,22 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     ),
                     if (wordType.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.teal[800],
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           wordType,
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
                         ),
                       ),
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.bookmark_border, color: Colors.white70, size: 18),
+                      icon: const Icon(Icons.bookmark_border,
+                          color: Colors.white70, size: 18),
                       onPressed: () {},
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -204,21 +214,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text(
                           '• $d',
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                         ),
                       )),
                 if (definitions.isEmpty)
-                  const Text('No definition found.', style: TextStyle(color: Colors.white70)),
+                  const Text('No definition found.',
+                      style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
                 if (synonyms.isNotEmpty)
                   Wrap(
                     spacing: 6,
                     runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
-                          label: Text(s, style: const TextStyle(fontSize: 11)),
+                          label:
+                              Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
                           labelStyle: const TextStyle(color: Colors.white),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
                         )).toList(),
                   ),
