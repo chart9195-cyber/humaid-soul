@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'screens/library.dart';
 import 'screens/test_lookup.dart';
 
 void main() {
-  // Register Syncfusion community license (free for individual developers)
-  SyncfusionLicense.registerLicense(null); // null means community license
+  // Syncfusion community license: no registration needed since v18.3.0.x
   runApp(const HumaidSoulApp());
 }
 
