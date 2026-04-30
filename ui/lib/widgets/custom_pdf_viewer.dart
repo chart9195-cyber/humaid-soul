@@ -5,6 +5,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
+  final int initialPage; // 1‑based
   final void Function(String word, Offset localPosition)? onWordTap;
   final void Function()? onNoText;
   final void Function()? onWordMapReady;
@@ -13,6 +14,7 @@ class CustomPdfViewer extends StatefulWidget {
   const CustomPdfViewer({
     super.key,
     required this.filePath,
+    this.initialPage = 1,
     this.onWordTap,
     this.onNoText,
     this.onWordMapReady,
@@ -33,7 +35,6 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
 
   List<List<WordEntry>> get wordMap => _wordMap;
   bool get isWordMapReady => _wordMapReady;
-  PdfViewerController get controller => _controller;
 
   @override
   void initState() {
@@ -128,22 +129,12 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
-  /// Returns fraction of total document length (0-1) based on current page.
+  /// Save‑friendly fraction of current page position.
   double getScrollFraction() {
     final totalPages = _wordMap.length;
     if (totalPages <= 1) return 0;
     final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
     return ((curPage - 1) / (totalPages - 1)).clamp(0.0, 1.0);
-  }
-
-  /// Jumps to approximate page based on fraction.
-  void restoreScrollFraction(double fraction) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final totalPages = _wordMap.length;
-      if (totalPages == 0) return;
-      final targetPage = (fraction * (totalPages - 1)).round() + 1;
-      _controller.pageNumber = targetPage; // stable setter
-    });
   }
 
   @override
@@ -159,6 +150,7 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
           return SfPdfViewer.file(
             File(widget.filePath),
             controller: _controller,
+            initialPageNumber: widget.initialPage,
             onTap: _onTap,
           );
         },

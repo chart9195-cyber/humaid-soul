@@ -37,6 +37,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _ttsAvailable = false;
   bool _ttsActive = false;
 
+  int _initialPage = 1;
+
   final GlobalKey<CustomPdfViewerState> _viewerKey = GlobalKey<CustomPdfViewerState>();
 
   @override
@@ -46,6 +48,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _bridge.load();
     _tts.onError = (m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
     _tts.init().then((ok) => setState(() => _ttsAvailable = ok));
+    _restorePosition();
+  }
+
+  Future<void> _restorePosition() async {
+    final page = await ReadingPosition.get(widget.pdfPath);
+    if (page != null && page > 0) {
+      setState(() => _initialPage = page);
+    }
   }
 
   void _onWordMapReady() async {
@@ -55,17 +65,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final tier = await TierHighlighter.getTierWords(viewerState.wordMap);
       if (mounted) setState(() => _tierWords = tier);
     }
-    final pos = await ReadingPosition.get(widget.pdfPath);
-    if (pos != null && _viewerKey.currentState != null) {
-      _viewerKey.currentState!.restoreScrollFraction(pos);
-    }
   }
 
   Future<void> _savePosition() async {
     final state = _viewerKey.currentState;
     if (state != null) {
       final fraction = state.getScrollFraction();
-      await ReadingPosition.save(widget.pdfPath, fraction);
+      // Convert fraction back to page number for saving
+      final totalPages = state.wordMap.length;
+      if (totalPages > 0) {
+        final page = (fraction * (totalPages - 1)).round() + 1;
+        await ReadingPosition.save(widget.pdfPath, page);
+      }
     }
   }
 
@@ -227,6 +238,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               CustomPdfViewer(
                 key: _viewerKey,
                 filePath: widget.pdfPath,
+                initialPage: _initialPage,
                 onWordTap: _onWordTap,
                 onNoText: _onNoText,
                 onWordMapReady: _onWordMapReady,
