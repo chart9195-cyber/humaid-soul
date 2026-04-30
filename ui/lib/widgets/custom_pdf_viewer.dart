@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:dart_pdf/dart_pdf.dart';
+import 'package:pdf/pdf.dart';
 
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
@@ -68,18 +68,13 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     final viewScale = 1.5 * MediaQuery.of(context).devicePixelRatio;
     final width = max(200, (_pageWidth * viewScale).round());
     final height = max(200, (_pageHeight * viewScale).round());
-    final pngData = await page.render(
-      width: width,
-      height: height,
-      format: PdfPageImageFormat.png,
-    );
-    if (pngData == null) throw Exception('Render failed');
-    final image = await decodeImageFromList(pngData.bytes);
+    final pageImage = await page.render(width: width, height: height);
+    if (pageImage == null) throw Exception('Render failed');
+    final image = await decodeImageFromList(pageImage.bytes);
     return image;
   }
 
   Future<void> _preRenderVisible(int centerPage) async {
-    // Render a small window around the visible page
     final start = max(0, centerPage - 2);
     final end = min(_pageCount, centerPage + 3);
     for (int i = start; i < end; i++) {
@@ -92,7 +87,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
         _renderFutures[i] = null;
       }
     }
-    // Dispose images not in the window
     final keep = {start, end - 1, start + 1, end - 2, centerPage};
     _pageImages.keys
         .where((k) => !keep.contains(k))
@@ -107,17 +101,16 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   void _onTapUp(TapUpDetails details) {
     if (_screenWidth == 0) return;
     final localPos = details.localPosition;
-    final pageIndex = (localPos.dy / (_screenWidth * (_pageHeight / _pageWidth))).floor();
+    final imageHeight = _screenWidth * (_pageHeight / _pageWidth);
+    final pageIndex = (localPos.dy / imageHeight).floor();
     if (pageIndex < 0 || pageIndex >= _pageCount) return;
 
     final pageImage = _pageImages[pageIndex];
     if (pageImage == null) return;
 
-    final imageHeight = _screenWidth * (_pageHeight / _pageWidth);
     final yInPage = localPos.dy - pageIndex * imageHeight;
     final xInPage = localPos.dx;
 
-    // Convert to PDF coordinates (bottom‑left origin in PDF, but we treat as top‑left)
     final scaleX = _pageWidth / _screenWidth;
     final scaleY = _pageHeight / imageHeight;
     final pdfX = xInPage * scaleX;
@@ -151,7 +144,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
       final imageHeight = _screenWidth * (_pageHeight / _pageWidth);
       final totalHeight = imageHeight * _pageCount;
 
-      // Pre-render based on scroll
       _scrollController.addListener(() {
         final scrollOffset = _scrollController.offset;
         final centerPage = (scrollOffset / imageHeight).floor();
@@ -170,7 +162,7 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
               return SizedBox(
                 width: _screenWidth,
                 height: imageHeight,
-                child: RawImage(image: image, fit: BoxFit.cover),
+                child: RawImage(image: image, fit: BoxFit.contain),
               );
             } else {
               return Container(
