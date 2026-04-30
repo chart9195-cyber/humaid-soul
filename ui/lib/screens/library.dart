@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import '../core_bridge.dart';
+import '../services/vocab_bank.dart';
 import 'reader.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -15,18 +15,12 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   List<String> _documents = [];
-  final CoreBridge _bridge = CoreBridge();
+  Map<String, int> _wordCounts = {};
 
   @override
   void initState() {
     super.initState();
     _loadLibrary();
-    _initEngine();
-  }
-
-  Future<void> _initEngine() async {
-    await _bridge.loadIfNeeded();
-    setState(() {});
   }
 
   Future<void> _loadLibrary() async {
@@ -39,6 +33,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _removeDeadEntries();
       });
     }
+    _updateWordCounts();
   }
 
   void _removeDeadEntries() {
@@ -52,6 +47,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await file.writeAsString(jsonEncode(_documents));
   }
 
+  Future<void> _updateWordCounts() async {
+    final allWords = await VocabBank.load();
+    final counts = <String, int>{};
+    for (final doc in _documents) {
+      final docName = doc.split('/').last;
+      final count = allWords.where((w) => w.sourceDocument == docName).length;
+      counts[doc] = count;
+    }
+    setState(() => _wordCounts = counts);
+  }
+
   Future<void> _importPDF() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -62,11 +68,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (path != null && !_documents.contains(path)) {
         setState(() => _documents.add(path));
         await _saveLibrary();
+        await _updateWordCounts();
       }
     }
   }
 
-  void _openDocument(String path) {
+  void _openDocument(String path) async {
     if (!File(path).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('File no longer exists.')),
@@ -74,17 +81,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _removeDeadEntries();
       return;
     }
-    if (_bridge.state != EngineState.ready) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Dictionary engine not ready.')),
-      );
-      _initEngine(); // retry
-      return;
-    }
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ReaderScreen(pdfPath: path)),
     );
+    // Refresh word counts when returning from reader
+    _updateWordCounts();
   }
 
   @override
@@ -93,7 +95,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: const Text('HUMAID SOUL'),
         actions: [
-          _buildEngineIcon(),
+          IconButton(
+            icon: const Icon(Icons.book),
+            tooltip: 'Vocabulary Bank',
+            onPressed: () => Navigator.pushNamed(context, '/vocab'),
+          ),
           IconButton(icon: const Icon(Icons.add), onPressed: _importPDF),
         ],
       ),
@@ -108,9 +114,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
               itemBuilder: (_, i) {
                 final path = _documents[i];
                 final name = path.split('/').last;
+                final wordCount = _wordCounts[path] ?? 0;
                 return ListTile(
                   leading: const Icon(Icons.picture_as_pdf),
                   title: Text(name),
+                  subtitle: wordCount > 0 ? Text('$wordCount saved words') : null,
                   onTap: () => _openDocument(path),
                 );
               },
@@ -121,33 +129,5 @@ class _LibraryScreenState extends State<LibraryScreen> {
         icon: const Icon(Icons.search),
       ),
     );
-  }
-
-  Widget _buildEngineIcon() {
-    switch (_bridge.state) {
-      case EngineState.ready:
-        return const Icon(Icons.check_circle, color: Colors.green, size: 20);
-      case EngineState.error:
-        return GestureDetector(
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Engine error: ${_bridge.errorMessage ?? "unknown"}')),
-            );
-            _initEngine();
-          },
-          child: const Icon(Icons.error, color: Colors.red, size: 20),
-        );
-      case EngineState.loading:
-        return const Padding(
-          padding: EdgeInsets.all(16),
-          child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        );
-      default:
-        return const SizedBox.shrink();
-    }
   }
 }

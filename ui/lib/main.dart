@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'screens/library.dart';
 import 'screens/test_lookup.dart';
+import 'screens/vocabulary.dart';
 
 void main() {
-  // Syncfusion community license: no registration needed since v18.3.0.x
   runApp(const HumaidSoulApp());
 }
 
@@ -23,6 +23,7 @@ class HumaidSoulApp extends StatelessWidget {
       routes: {
         '/': (context) => const LibraryScreen(),
         '/test': (context) => const TestLookupScreen(),
+        '/vocab': (context) => const VocabScreen(),
       },
       debugShowCheckedModeBanner: false,
     );
