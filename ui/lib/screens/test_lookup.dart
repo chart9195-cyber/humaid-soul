@@ -14,6 +14,26 @@ class _TestLookupScreenState extends State<TestLookupScreen> {
   String _result = '';
   bool _loading = false;
 
+  Future<void> _ensureEngineReady() async {
+    final bridge = CoreBridge();
+
+    // Already ready
+    if (bridge.state == EngineState.ready) return;
+
+    // Currently loading – wait a moment, then re‑check
+    if (bridge.state == EngineState.loading) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (bridge.state == EngineState.ready) return;
+      // fall through to error
+    }
+
+    // Not loaded yet or error – try loading now
+    await bridge.load();
+    if (bridge.state != EngineState.ready) {
+      throw Exception(bridge.errorMessage ?? 'Engine failed to load.');
+    }
+  }
+
   Future<void> _performLookup() async {
     final word = _wordController.text.trim();
     if (word.isEmpty) return;
@@ -23,28 +43,24 @@ class _TestLookupScreenState extends State<TestLookupScreen> {
       _result = '';
     });
 
-    final bridge = CoreBridge();
-    if (!bridge.isLoaded) {
-      final ok = await bridge.load();
-      if (!ok) {
-        setState(() {
-          _result = 'Failed to load dictionary engine.';
-          _loading = false;
-        });
-        return;
-      }
-    }
-
-    final json = bridge.lookup(word);
     try {
-      final parsed = jsonDecode(json);
-      if (parsed is List && parsed.isEmpty) {
+      await _ensureEngineReady();
+
+      final bridge = CoreBridge();
+      final json = bridge.lookup(word);
+
+      if (json == '[]') {
         _result = 'No definition found.';
       } else {
-        _result = const JsonEncoder.withIndent('  ').convert(parsed);
+        final parsed = jsonDecode(json);
+        if (parsed is List && parsed.isEmpty) {
+          _result = 'No definition found.';
+        } else {
+          _result = const JsonEncoder.withIndent('  ').convert(parsed);
+        }
       }
-    } catch (_) {
-      _result = json;
+    } catch (e) {
+      _result = 'Error: $e';
     }
 
     setState(() => _loading = false);
