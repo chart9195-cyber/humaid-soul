@@ -128,22 +128,21 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
+  /// Returns fraction of total document length (0-1) based on current page.
   double getScrollFraction() {
-    final totalHeight = _pageHeight * _wordMap.length;
-    if (totalHeight == 0) return 0;
+    final totalPages = _wordMap.length;
+    if (totalPages <= 1) return 0;
     final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
-    final curOffset = _controller.scrollOffset.dy;
-    final currentY = (curPage - 1) * _pageHeight + curOffset;
-    return (currentY / totalHeight).clamp(0.0, 1.0);
+    return ((curPage - 1) / (totalPages - 1)).clamp(0.0, 1.0);
   }
 
+  /// Jumps to approximate page based on fraction.
   void restoreScrollFraction(double fraction) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final totalPdfHeight = _pageHeight * _wordMap.length;
-      final targetY = fraction * totalPdfHeight;
-      final pageIdx = (targetY / _pageHeight).floor();
-      final yInPage = targetY - pageIdx * _pageHeight;
-      _controller.scrollTo(Offset(0, yInPage), pageIndex: pageIdx);
+      final totalPages = _wordMap.length;
+      if (totalPages == 0) return;
+      final targetPage = (fraction * (totalPages - 1)).round() + 1;
+      _controller.pageNumber = targetPage; // stable setter
     });
   }
 
