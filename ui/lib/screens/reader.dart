@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core_bridge.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import 'dart:convert';
+import 'dart:math';
 
 class ReaderScreen extends StatefulWidget {
   final String pdfPath;
@@ -111,7 +112,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Widget _buildHUD() {
     final wordType = _entry!['word_type'] ?? '';
-    final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final definitions =
+        (_entry!['definitions'] as List?)?.cast<String>() ?? [];
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
@@ -133,18 +135,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     Expanded(
                       child: Text(_tappedWord!,
                           style: const TextStyle(
-                              color: Colors.tealAccent, fontSize: 20, fontWeight: FontWeight.bold)),
+                              color: Colors.tealAccent,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold)),
                     ),
                     if (wordType.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                            color: Colors.teal[800], borderRadius: BorderRadius.circular(4)),
+                            color: Colors.teal[800],
+                            borderRadius: BorderRadius.circular(4)),
                         child: Text(wordType,
-                            style: const TextStyle(color: Colors.white, fontSize: 12)),
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12)),
                       ),
                     IconButton(
-                      icon: const Icon(Icons.bookmark_border, color: Colors.white70, size: 18),
+                      icon: const Icon(Icons.bookmark_border,
+                          color: Colors.white70, size: 18),
                       onPressed: () {},
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -156,7 +164,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ...definitions.take(3).map((d) => Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text('• $d',
-                            style: const TextStyle(color: Colors.white, fontSize: 14)),
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 14)),
                       )),
                 if (definitions.isEmpty)
                   const Text('No definition found.',
@@ -164,12 +173,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 const SizedBox(height: 8),
                 if (synonyms.isNotEmpty)
                   Wrap(
-                    spacing: 6, runSpacing: 2,
+                    spacing: 6,
+                    runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
-                          label: Text(s, style: const TextStyle(fontSize: 11)),
+                          label:
+                              Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
                           labelStyle: const TextStyle(color: Colors.white),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
                         )).toList(),
                   ),
