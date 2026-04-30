@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
@@ -29,19 +30,27 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   final PdfViewerController _controller = PdfViewerController();
   double _pageWidth = 0;
   double _pageHeight = 0;
+  Size _viewerSize = Size.zero;
 
   @override
   void initState() {
     super.initState();
     _buildWordMap();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final box = context.findRenderObject() as RenderBox?;
+      if (box != null) {
+        _viewerSize = box.size;
+      }
+    });
   }
 
   Future<void> _buildWordMap() async {
     try {
       final bytes = await File(widget.filePath).readAsBytes();
       final doc = sf_pdf.PdfDocument(inputBytes: bytes);
-      _pageWidth = doc.pages[0].mediaBox.width;
-      _pageHeight = doc.pages[0].mediaBox.height;
+      // Use the size property, not mediaBox
+      _pageWidth = doc.pages[0].size.width;
+      _pageHeight = doc.pages[0].size.height;
 
       final extractor = sf_pdf.PdfTextExtractor(doc);
       final lines = extractor.extractTextLines();
@@ -79,29 +88,29 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     return null;
   }
 
-  // Manual matrix‑vector multiplication: M * (x,y,0,1) → (x',y')
-  Offset _transformPoint(Matrix4 m, double x, double y) {
-    final storage = m.storage;
-    final w = storage[3]*x + storage[7]*y + storage[11]*0 + storage[15];
-    if (w.abs() < 0.0001) return Offset.zero; // degenerate
-    final tx = (storage[0]*x + storage[4]*y + storage[8]*0 + storage[12]) / w;
-    final ty = (storage[1]*x + storage[5]*y + storage[9]*0 + storage[13]) / w;
-    return Offset(tx, ty);
-  }
-
+  /// Convert widget‑space position to PDF page index + coordinates,
+  /// using the controller’s scroll offset and page number.
   _PdfHit? _widgetToPdf(Offset widgetPos) {
-    if (_pageWidth == 0 || _pageHeight == 0) return null;
-    Matrix4 inverse;
-    try {
-      inverse = Matrix4.inverted(_controller.transformation);
-    } catch (_) {
-      return null;
-    }
-    final pdfPoint = _transformPoint(inverse, widgetPos.dx, widgetPos.dy);
-    final pageIdx = (pdfPoint.dy / _pageHeight).floor();
+    if (_pageWidth == 0 || _pageHeight == 0 || _viewerSize.isEmpty) return null;
+
+    final viewerWidth = _viewerSize.width;
+    final scale = viewerWidth / _pageWidth; // fit‑width scale factor
+
+    final pageNumber = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    final scrollOffset = _controller.scrollOffset; // in PDF points within current page
+
+    // Total vertical offset from document start in PDF points
+    final totalScrollY = (pageNumber - 1) * _pageHeight + scrollOffset.dy;
+
+    // Tap position in PDF coordinates
+    final pdfX = widgetPos.dx / scale;
+    final pdfY = totalScrollY + widgetPos.dy / scale;
+
+    final pageIdx = (pdfY / _pageHeight).floor();
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
-    final pageY = pdfPoint.dy - pageIdx * _pageHeight;
-    return _PdfHit(pageIdx, Offset(pdfPoint.dx, pageY));
+    final pageY = pdfY - pageIdx * _pageHeight;
+
+    return _PdfHit(pageIdx, Offset(pdfX, pageY));
   }
 
   void _onTap(PdfGestureDetails details) {
@@ -134,10 +143,19 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   Widget build(BuildContext context) {
     return GestureDetector(
       onLongPressStart: _onLongPress,
-      child: SfPdfViewer.file(
-        File(widget.filePath),
-        controller: _controller,
-        onTap: _onTap,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Update viewer size when layout changes
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final box = context.findRenderObject() as RenderBox?;
+            if (box != null) _viewerSize = box.size;
+          });
+          return SfPdfViewer.file(
+            File(widget.filePath),
+            controller: _controller,
+            onTap: _onTap,
+          );
+        },
       ),
     );
   }
