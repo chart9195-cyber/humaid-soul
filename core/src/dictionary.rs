@@ -2,11 +2,14 @@ use once_cell::sync::OnceCell;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::io::Read;
+use std::path::Path;
 use std::sync::Mutex;
 
 static DICTIONARY: OnceCell<Mutex<Connection>> = OnceCell::new();
 
+/// Load dictionary from compressed file. Creates a sibling `.db` file for actual access.
 pub fn load_dictionary(path_zst: &str) -> bool {
+    // Read compressed file
     let mut file = match std::fs::File::open(path_zst) {
         Ok(f) => f,
         Err(e) => {
@@ -18,6 +21,8 @@ pub fn load_dictionary(path_zst: &str) -> bool {
     if file.read_to_end(&mut compressed).is_err() {
         return false;
     }
+
+    // Decompress
     let mut decoder = match zstd::stream::Decoder::new(&compressed[..]) {
         Ok(d) => d,
         Err(e) => {
@@ -29,11 +34,18 @@ pub fn load_dictionary(path_zst: &str) -> bool {
     if decoder.read_to_end(&mut decompressed).is_err() {
         return false;
     }
-    let temp_path = "/tmp/soul_dict_temp.db";
-    if std::fs::write(temp_path, &decompressed).is_err() {
+
+    // Derive a writable path in the same directory as the zst file
+    let zst_path = Path::new(path_zst);
+    let dir = zst_path.parent().unwrap_or_else(|| Path::new("."));
+    let db_path = dir.join("soul_dict_temp.db");
+
+    if std::fs::write(&db_path, &decompressed).is_err() {
+        log::error!("Failed to write temporary dictionary to {:?}", db_path);
         return false;
     }
-    let conn = match Connection::open(temp_path) {
+
+    let conn = match Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
             log::error!("Failed to open temporary dictionary DB: {}", e);
@@ -41,6 +53,7 @@ pub fn load_dictionary(path_zst: &str) -> bool {
         }
     };
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
+
     DICTIONARY.set(Mutex::new(conn)).is_ok()
 }
 
@@ -93,8 +106,6 @@ pub fn fuzzy_search(word: &str, max_results: usize) -> String {
     serde_json::to_string(&matches).unwrap_or_default()
 }
 
-// ---- internal helpers ----
-
 fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
     let mut stmt = conn
         .prepare(
@@ -134,7 +145,6 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
-    // 1. Check lemma_map for irregulars + manually added forms
     if let Ok(lemma) = conn.query_row(
         "SELECT lemma FROM lemma_map WHERE inflected = ?1",
         params![word],
@@ -142,30 +152,19 @@ fn lemmatize_impl(conn: &Connection, word: &str) -> String {
     ) {
         return lemma;
     }
-    // 2. Apply simple suffix‑stripping stemmer for regular inflections
     let lower = word.to_lowercase();
     let stemmed = english_regular_stem(&lower);
     if stemmed != lower {
-        // verify that the stemmed form exists in words table
         let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM words WHERE word = ?1",
-                params![stemmed],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row("SELECT COUNT(*) FROM words WHERE word = ?1", params![stemmed], |row| row.get::<_, i64>(0))
             .map(|c| c > 0)
             .unwrap_or(false);
-        if exists {
-            return stemmed;
-        }
+        if exists { return stemmed; }
     }
     word.to_string()
 }
 
-/// A conservative, lightweight English stemmer that strips common suffixes.
-/// Not as aggressive as Porter; only removes endings that reliably indicate a regular inflection.
 fn english_regular_stem(word: &str) -> String {
-    // order matters – strip longer suffixes first
     let suffixes = [
         ("nesses", ""), ("ingly", ""), ("ations", "ate"), ("tions", "t"),
         ("sses", "ss"), ("ships", "ship"), ("ments", "ment"),
@@ -174,9 +173,7 @@ fn english_regular_stem(word: &str) -> String {
     ];
     for (suffix, replacement) in suffixes.iter() {
         if word.ends_with(suffix) && word.len() > suffix.len() + 1 {
-            let stem = format!("{}{}", &word[..word.len()-suffix.len()], replacement);
-            // avoid over‑stemming; just return the stem
-            return stem;
+            return format!("{}{}", &word[..word.len()-suffix.len()], replacement);
         }
     }
     word.to_string()
@@ -197,10 +194,7 @@ fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> 
     let mut scored: Vec<(f64, String)> = candidates
         .into_iter()
         .map(|candidate| {
-            let dist = strsim::normalized_levenshtein(
-                &word.to_lowercase(),
-                &candidate.to_lowercase(),
-            );
+            let dist = strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
             (dist, candidate)
         })
         .collect();

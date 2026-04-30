@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'screens/library.dart';
+import 'screens/test_lookup.dart';
 
 void main() {
+  // Register Syncfusion community license (free for individual developers)
+  SyncfusionLicense.registerLicense(null); // null means community license
   runApp(const HumaidSoulApp());
 }
 
@@ -16,9 +20,12 @@ class HumaidSoulApp extends StatelessWidget {
         brightness: Brightness.dark,
         primaryColor: Colors.teal,
         scaffoldBackgroundColor: const Color(0xFF1E1E2E),
-        fontFamily: 'Roboto',
       ),
-      home: const LibraryScreen(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const LibraryScreen(),
+        '/test': (context) => const TestLookupScreen(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }
