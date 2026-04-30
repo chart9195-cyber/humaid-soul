@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
@@ -21,10 +20,10 @@ class CustomPdfViewer extends StatefulWidget {
   });
 
   @override
-  State<CustomPdfViewer> createState() => _CustomPdfViewerState();
+  CustomPdfViewerState createState() => CustomPdfViewerState();
 }
 
-class _CustomPdfViewerState extends State<CustomPdfViewer> {
+class CustomPdfViewerState extends State<CustomPdfViewer> {
   List<List<WordEntry>> _wordMap = [];
   bool _wordMapReady = false;
   final PdfViewerController _controller = PdfViewerController();
@@ -32,15 +31,17 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   double _pageHeight = 0;
   Size _viewerSize = Size.zero;
 
+  List<List<WordEntry>> get wordMap => _wordMap;
+  bool get isWordMapReady => _wordMapReady;
+  PdfViewerController get controller => _controller;
+
   @override
   void initState() {
     super.initState();
     _buildWordMap();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final box = context.findRenderObject() as RenderBox?;
-      if (box != null) {
-        _viewerSize = box.size;
-      }
+      if (box != null) _viewerSize = box.size;
     });
   }
 
@@ -48,7 +49,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     try {
       final bytes = await File(widget.filePath).readAsBytes();
       final doc = sf_pdf.PdfDocument(inputBytes: bytes);
-      // Use the size property, not mediaBox
       _pageWidth = doc.pages[0].size.width;
       _pageHeight = doc.pages[0].size.height;
 
@@ -88,28 +88,18 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     return null;
   }
 
-  /// Convert widget‑space position to PDF page index + coordinates,
-  /// using the controller’s scroll offset and page number.
   _PdfHit? _widgetToPdf(Offset widgetPos) {
     if (_pageWidth == 0 || _pageHeight == 0 || _viewerSize.isEmpty) return null;
-
     final viewerWidth = _viewerSize.width;
-    final scale = viewerWidth / _pageWidth; // fit‑width scale factor
-
+    final scale = viewerWidth / _pageWidth;
     final pageNumber = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
-    final scrollOffset = _controller.scrollOffset; // in PDF points within current page
-
-    // Total vertical offset from document start in PDF points
+    final scrollOffset = _controller.scrollOffset;
     final totalScrollY = (pageNumber - 1) * _pageHeight + scrollOffset.dy;
-
-    // Tap position in PDF coordinates
     final pdfX = widgetPos.dx / scale;
     final pdfY = totalScrollY + widgetPos.dy / scale;
-
     final pageIdx = (pdfY / _pageHeight).floor();
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
     final pageY = pdfY - pageIdx * _pageHeight;
-
     return _PdfHit(pageIdx, Offset(pdfX, pageY));
   }
 
@@ -120,7 +110,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     final pageIdx = pageNumber - 1;
     final pageOffset = details.pagePosition;
     if (pageOffset == null) return;
-
     final word = _hitTestWord(pageIdx, pageOffset);
     if (word != null) {
       widget.onWordTap?.call(word, details.position);
@@ -139,13 +128,31 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
+  double getScrollFraction() {
+    final totalHeight = _pageHeight * _wordMap.length;
+    if (totalHeight == 0) return 0;
+    final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    final curOffset = _controller.scrollOffset.dy;
+    final currentY = (curPage - 1) * _pageHeight + curOffset;
+    return (currentY / totalHeight).clamp(0.0, 1.0);
+  }
+
+  void restoreScrollFraction(double fraction) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final totalPdfHeight = _pageHeight * _wordMap.length;
+      final targetY = fraction * totalPdfHeight;
+      final pageIdx = (targetY / _pageHeight).floor();
+      final yInPage = targetY - pageIdx * _pageHeight;
+      _controller.scrollTo(Offset(0, yInPage), pageIndex: pageIdx);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onLongPressStart: _onLongPress,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Update viewer size when layout changes
           WidgetsBinding.instance.addPostFrameCallback((_) {
             final box = context.findRenderObject() as RenderBox?;
             if (box != null) _viewerSize = box.size;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../vocab.dart';
+import '../services/vocab_bank.dart';
+import '../services/anki_export.dart';
 
 class VocabScreen extends StatefulWidget {
   const VocabScreen({super.key});
@@ -26,10 +27,28 @@ class _VocabScreenState extends State<VocabScreen> {
     });
   }
 
+  Future<void> _exportAnki() async {
+    final path = await AnkiExport.exportVocabToCSV();
+    if (path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No words to export.')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Exported to $path')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Vocabulary Bank')),
+      appBar: AppBar(
+        title: const Text('Vocabulary Bank'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.file_download),
+            tooltip: 'Export to Anki CSV',
+            onPressed: _exportAnki,
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _entries.isEmpty
@@ -39,10 +58,8 @@ class _VocabScreenState extends State<VocabScreen> {
                   itemBuilder: (context, i) {
                     final entry = _entries[i];
                     return ListTile(
-                      title: Text(entry.word,
-                          style: const TextStyle(color: Colors.tealAccent)),
-                      subtitle: Text(entry.definition,
-                          maxLines: 2, overflow: TextOverflow.ellipsis),
+                      title: Text(entry.word, style: const TextStyle(color: Colors.tealAccent)),
+                      subtitle: Text(entry.definition, maxLines: 2, overflow: TextOverflow.ellipsis),
                       trailing: Text(entry.savedAt.toString().substring(0, 10)),
                     );
                   },

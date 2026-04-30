@@ -86,7 +86,7 @@ jobs:
         with:
           flutter-version: '3.22.0'
           channel: stable
-      - name: Generate Android project and patch SDK
+      - name: Generate Android project and patch for PDF intent filter
         run: |
           if [ ! -d "ui/android" ]; then
             TEMP_DIR=$(mktemp -d)
@@ -96,14 +96,27 @@ jobs:
             cp -r "$TEMP_DIR/temp_app/android" ui/
             rm -rf "$TEMP_DIR"
           fi
-          # Bump minSdkVersion to 21 for Syncfusion compatibility
+          # Bump minSdkVersion
           sed -i 's/minSdkVersion .*/minSdkVersion 21/' ui/android/app/build.gradle
-          # Ensure compileSdkVersion is at least 33
           sed -i 's/compileSdkVersion .*/compileSdkVersion 33/' ui/android/app/build.gradle
-          # Add ProGuard rules to keep Syncfusion classes
+          # ProGuard rules
           mkdir -p ui/android/app/proguard
           echo "-keep class com.syncfusion.** { *; }" > ui/android/app/proguard/proguard-rules.pro
           echo "-dontwarn com.syncfusion.**" >> ui/android/app/proguard/proguard-rules.pro
+          # Add intent filter for PDFs (inside the main activity)
+          MANIFEST="ui/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # Insert intent filter before the closing </activity> tag of the main activity
+            sed -i '/<\/activity>/i \
+            <intent-filter> \
+                <action android:name="android.intent.action.VIEW"/> \
+                <category android:name="android.intent.category.DEFAULT"/> \
+                <category android:name="android.intent.category.BROWSABLE"/> \
+                <data android:scheme="file"/> \
+                <data android:scheme="content"/> \
+                <data android:mimeType="application/pdf"/> \
+            </intent-filter>' "$MANIFEST"
+          fi
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
@@ -125,7 +138,6 @@ jobs:
           name: soul-dictionary
           path: soul_dict.db.zst
 
-      # ---------- Release (on tag) ----------
       - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v') && success()
         uses: softprops/action-gh-release@v1
