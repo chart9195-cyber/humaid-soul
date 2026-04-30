@@ -36,26 +36,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Future<void> _onViewerTap(Offset globalPosition) async {
     if (_document == null || _controller == null) return;
 
-    // Convert global tap position to local widget coordinates
+    // 1. Convert global tap to widget-local coordinates
     final RenderBox? box =
         _viewerKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return;
-
     final localPosition = box.globalToLocal(globalPosition);
 
-    // Get the current visible page number
-    final pageNumber = _controller!.pageNumber;
+    // 2. Convert widget-local coordinates to PDF page coordinates
+    final pageOffset = _controller!.toPageCoordinate(localPosition);
+    if (pageOffset == null) return;
+
+    // 3. Determine current page (nullable, default to 1)
+    final pageNumber = _controller!.pageNumber ?? 1;
     if (pageNumber < 1 || pageNumber > _document!.pages.length) return;
 
-    // Convert the local widget coordinates to PDF page coordinates
-    final pageOffset = _controller!.toPageOffset(localPosition);
-
-    // Load text layer for the current page
+    // 4. Load text layer for current page
     final page = _document!.pages[pageNumber - 1];
     final pageText = await page.loadText();
     if (pageText == null) return;
 
-    final word = pageText.wordAt(pageOffset);
+    // 5. Hit-test: find word whose bounding rect contains the page offset
+    String? word;
+    for (final w in pageText.words) {
+      if (w.rect.contains(pageOffset)) {
+        word = w.text;
+        break;
+      }
+    }
+
     if (word != null && word.isNotEmpty) {
       _fetchDefinition(word, pageOffset);
     }
@@ -154,8 +162,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Widget _buildHUD() {
     final wordType = _entry!['word_type'] ?? '';
-    final definitions =
-        (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
@@ -186,22 +193,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     ),
                     if (wordType.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.teal[800],
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           wordType,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
                         ),
                       ),
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.bookmark_border,
-                          color: Colors.white70, size: 18),
+                      icon: const Icon(Icons.bookmark_border, color: Colors.white70, size: 18),
                       onPressed: () {},
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -214,25 +218,21 @@ class _ReaderScreenState extends State<ReaderScreen> {
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text(
                           '• $d',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 14),
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
                         ),
                       )),
                 if (definitions.isEmpty)
-                  const Text('No definition found.',
-                      style: TextStyle(color: Colors.white70)),
+                  const Text('No definition found.', style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
                 if (synonyms.isNotEmpty)
                   Wrap(
                     spacing: 6,
                     runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
-                          label:
-                              Text(s, style: const TextStyle(fontSize: 11)),
+                          label: Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
                           labelStyle: const TextStyle(color: Colors.white),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
                         )).toList(),
                   ),
