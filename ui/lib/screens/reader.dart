@@ -13,10 +13,10 @@ class ReaderScreen extends StatefulWidget {
 
 class _ReaderScreenState extends State<ReaderScreen> {
   String? _tappedWord;
-  Map<String, dynamic>? _entry; // parsed JSON from engine
+  Map<String, dynamic>? _entry;
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
-  final GlobalKey _pdfKey = GlobalKey();
+  PdfViewerController? _controller;
 
   @override
   void initState() {
@@ -30,10 +30,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  void _onPageTap(PdfPage page, Offset pageOffset) {
-    final word = page.text?.wordAt(pageOffset);
-    if (word != null && word.isNotEmpty) {
-      _fetchDefinition(word, pageOffset);
+  Future<void> _onTap(int pageNumber, Offset pageOffset) async {
+    if (_controller == null) return;
+
+    try {
+      // Get the document from the viewer controller
+      final doc = _controller!.document;
+      if (doc == null) return;
+
+      // Obtain the text layer for the tapped page (async)
+      final pageText = await doc.getText(pageNumber);
+      if (pageText == null) return;
+
+      final word = pageText.wordAt(pageOffset);
+      if (word != null && word.isNotEmpty) {
+        _fetchDefinition(word, pageOffset);
+      }
+    } catch (e) {
+      print("Tap error: $e");
     }
   }
 
@@ -54,7 +68,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     try {
       final parsed = jsonDecode(jsonStr);
       if (parsed is Map<String, dynamic>) {
-        // Rust WordEntry structure: {word, word_type, definitions, synonyms}
         setState(() {
           _tappedWord = word;
           _entry = parsed;
@@ -83,10 +96,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
     double left = tap.dx - hudWidth / 2;
     double top = tap.dy - hudHeight - 40;
 
-    // Keep on screen
     if (left < 16) left = 16;
     if (left + hudWidth > screenWidth - 16) left = screenWidth - hudWidth - 16;
-    if (top < 80) top = tap.dy + 40; // show below if not enough space above
+    if (top < 80) top = tap.dy + 40;
     if (top + hudHeight > screenHeight - 40) top = screenHeight - hudHeight - 40;
 
     return Offset(left, top);
@@ -107,13 +119,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
       body: GestureDetector(
         onTap: _dismissHUD,
         child: Stack(
-          key: _pdfKey,
           children: [
             PdfViewer.file(
               widget.pdfPath,
-              onPageTap: (page, pageOffset, globalOffset) {
-                _onPageTap(page, pageOffset);
-              },
+              viewerParams: PdfViewerParams(
+                onViewerReady: (controller, _) {
+                  _controller = controller;
+                },
+                onTap: (pageNumber, offset) {
+                  _onTap(pageNumber, offset);
+                },
+              ),
             ),
             if (_tappedWord != null && _entry != null && _hudPosition != null)
               Positioned(
@@ -133,7 +149,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
-      // prevent parent tap from dismissing HUD when interacting with it
       onTap: () {},
       child: Material(
         elevation: 8,
@@ -147,7 +162,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Word & type
                 Row(
                   children: [
                     Expanded(
@@ -173,17 +187,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
                         ),
                       ),
                     const SizedBox(width: 8),
-                    // Save & speak icons
                     IconButton(
                       icon: const Icon(Icons.bookmark_border, color: Colors.white70, size: 18),
-                      onPressed: () { /* TODO: save to vocab bank */ },
+                      onPressed: () {},
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Definitions
                 if (definitions.isNotEmpty)
                   ...definitions.take(3).map((d) => Padding(
                         padding: const EdgeInsets.only(bottom: 4),
@@ -195,7 +207,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 if (definitions.isEmpty)
                   const Text('No definition found.', style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
-                // Synonyms
                 if (synonyms.isNotEmpty)
                   Wrap(
                     spacing: 6,
