@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
@@ -80,24 +79,29 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     return null;
   }
 
-  // Convert a widget‑space position to PDF page index + coordinates
+  // Manual matrix‑vector multiplication: M * (x,y,0,1) → (x',y')
+  Offset _transformPoint(Matrix4 m, double x, double y) {
+    final storage = m.storage;
+    final w = storage[3]*x + storage[7]*y + storage[11]*0 + storage[15];
+    if (w.abs() < 0.0001) return Offset.zero; // degenerate
+    final tx = (storage[0]*x + storage[4]*y + storage[8]*0 + storage[12]) / w;
+    final ty = (storage[1]*x + storage[5]*y + storage[9]*0 + storage[13]) / w;
+    return Offset(tx, ty);
+  }
+
   _PdfHit? _widgetToPdf(Offset widgetPos) {
     if (_pageWidth == 0 || _pageHeight == 0) return null;
-    final Matrix4 transform = _controller.transformation;
     Matrix4 inverse;
     try {
-      inverse = Matrix4.inverted(transform);
+      inverse = Matrix4.inverted(_controller.transformation);
     } catch (_) {
       return null;
     }
-    final pdfVec = inverse.transform(Vector4(widgetPos.dx, widgetPos.dy, 0, 1));
-    final pdfX = pdfVec.x;
-    final pdfY = pdfVec.y;
-    // determine page index by Y coordinate (each page is _pageHeight in PDF units)
-    final pageIdx = (pdfY / _pageHeight).floor();
+    final pdfPoint = _transformPoint(inverse, widgetPos.dx, widgetPos.dy);
+    final pageIdx = (pdfPoint.dy / _pageHeight).floor();
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
-    final pageY = pdfY - pageIdx * _pageHeight;
-    return _PdfHit(pageIdx, Offset(pdfX, pageY));
+    final pageY = pdfPoint.dy - pageIdx * _pageHeight;
+    return _PdfHit(pageIdx, Offset(pdfPoint.dx, pageY));
   }
 
   void _onTap(PdfGestureDetails details) {
