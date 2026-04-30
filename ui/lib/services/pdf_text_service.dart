@@ -20,7 +20,8 @@ class PdfTextService {
       final page = line.pageIndex;
       map.putIfAbsent(page, () => []).add(line.text);
     }
-    final totalPages = doc.pages.length;
+    // Use count instead of length for PdfPageCollection
+    final totalPages = doc.pages.count;
     _pageTexts = List.generate(totalPages, (i) => (map[i] ?? []).join(' '));
     doc.dispose();
     return _pageTexts!;
