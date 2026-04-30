@@ -18,16 +18,20 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Offset? _hudPosition;
   final CoreBridge _bridge = CoreBridge();
   bool _wordMapLoading = true;
+  bool _wordMapAvailable = false;
   DateTime _lastTapTime = DateTime(2000);
 
   @override
   void initState() {
     super.initState();
-    _bridge.load();
+    _bridge.loadIfNeeded();
   }
 
-  void _onWordMapReady() {
-    setState(() => _wordMapLoading = false);
+  void _onWordMapReady(bool success) {
+    setState(() {
+      _wordMapLoading = false;
+      _wordMapAvailable = success;
+    });
   }
 
   void _onWordTap(String word, Offset localPosition) {
@@ -120,6 +124,21 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(16),
                     child: Text('Indexing words...',
+                        style: TextStyle(color: Colors.white70)),
+                  ),
+                ),
+              ),
+            ),
+          if (!_wordMapLoading && !_wordMapAvailable)
+            const Positioned(
+              top: 80, left: 0, right: 0,
+              child: Center(
+                child: Card(
+                  color: Colors.black54,
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Tap-to-define not available for this PDF.\nYou can still read it.',
+                        textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white70)),
                   ),
                 ),

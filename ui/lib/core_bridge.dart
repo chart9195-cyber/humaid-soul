@@ -25,9 +25,27 @@ class CoreBridge {
 
   bool get isLoaded => state == EngineState.ready;
 
-  Future<void> load() async {
+  /// Call this to ensure the engine is ready. Safe to call multiple times.
+  Future<void> loadIfNeeded() async {
     if (state == EngineState.ready) return;
-    if (state == EngineState.loading) return;
+    if (state == EngineState.loading) {
+      // Wait for the current load to finish (simple polling, no event loop needed)
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (state == EngineState.ready || state == EngineState.error) return;
+      }
+    }
+    if (state == EngineState.error) {
+      // Allow retry
+      state = EngineState.uninitialized;
+      errorMessage = null;
+    }
+    await load();
+  }
+
+  /// Internal load – can be called externally only if state is uninitialized.
+  Future<void> load() async {
+    if (state == EngineState.ready || state == EngineState.loading) return;
 
     state = EngineState.loading;
     errorMessage = null;
@@ -51,7 +69,7 @@ class CoreBridge {
       if (result == 1) {
         state = EngineState.ready;
       } else {
-        errorMessage = 'Engine init returned failure.';
+        errorMessage = 'Engine initialization returned failure.';
         state = EngineState.error;
       }
     } catch (e) {

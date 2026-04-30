@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import '../core_bridge.dart';
 import 'reader.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -14,11 +15,18 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   List<String> _documents = [];
+  final CoreBridge _bridge = CoreBridge();
 
   @override
   void initState() {
     super.initState();
     _loadLibrary();
+    _initEngine();
+  }
+
+  Future<void> _initEngine() async {
+    await _bridge.loadIfNeeded();
+    setState(() {});
   }
 
   Future<void> _loadLibrary() async {
@@ -66,6 +74,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _removeDeadEntries();
       return;
     }
+    if (_bridge.state != EngineState.ready) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Dictionary engine not ready.')),
+      );
+      _initEngine(); // retry
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ReaderScreen(pdfPath: path)),
@@ -78,6 +93,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: const Text('HUMAID SOUL'),
         actions: [
+          _buildEngineIcon(),
           IconButton(icon: const Icon(Icons.add), onPressed: _importPDF),
         ],
       ),
@@ -105,5 +121,33 @@ class _LibraryScreenState extends State<LibraryScreen> {
         icon: const Icon(Icons.search),
       ),
     );
+  }
+
+  Widget _buildEngineIcon() {
+    switch (_bridge.state) {
+      case EngineState.ready:
+        return const Icon(Icons.check_circle, color: Colors.green, size: 20);
+      case EngineState.error:
+        return GestureDetector(
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Engine error: ${_bridge.errorMessage ?? "unknown"}')),
+            );
+            _initEngine();
+          },
+          child: const Icon(Icons.error, color: Colors.red, size: 20),
+        );
+      case EngineState.loading:
+        return const Padding(
+          padding: EdgeInsets.all(16),
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
   }
 }
