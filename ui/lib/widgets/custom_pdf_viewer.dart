@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
@@ -26,6 +27,9 @@ class CustomPdfViewer extends StatefulWidget {
 class _CustomPdfViewerState extends State<CustomPdfViewer> {
   List<List<WordEntry>> _wordMap = [];
   bool _wordMapReady = false;
+  Timer? _longPressTimer;
+  Offset? _pointerDownPosition;
+  PdfViewerController? _controller;
 
   @override
   void initState() {
@@ -62,31 +66,52 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
+  void _onViewerCreated(PdfViewerController controller) {
+    _controller = controller;
+  }
+
   void _handleTap(PdfGestureDetails details) {
-    _extractWord(details, isLongPress: false);
+    _extractWord(details.position, details.pagePosition, details.pageNumber,
+        isLongPress: false);
   }
 
-  void _handleLongPress(PdfGestureDetails details) {
-    _extractWord(details, isLongPress: true);
+  void _onPointerDown(PointerDownEvent event) {
+    _pointerDownPosition = event.position;
+    _longPressTimer?.cancel();
+    _longPressTimer = Timer(const Duration(milliseconds: 500), () {
+      if (_pointerDownPosition != null) {
+        _tryLongPress(_pointerDownPosition!);
+      }
+    });
   }
 
-  void _extractWord(PdfGestureDetails details, {required bool isLongPress}) {
+  void _onPointerUp(PointerUpEvent event) {
+    _longPressTimer?.cancel();
+  }
+
+  void _tryLongPress(Offset widgetPosition) {
+    if (!_wordMapReady || _controller == null) return;
+
+    // Convert widget coordinates to page coordinates using controller
+    final pageCoord = _controller!.toPageCoordinate(widgetPosition);
+    if (pageCoord == null) return;
+
+    final pageNumber = _controller!.pageNumber ?? 1;
+    _extractWord(widgetPosition, pageCoord, pageNumber, isLongPress: true);
+  }
+
+  void _extractWord(Offset widgetPosition, Offset pagePosition, int? pageNumber,
+      {required bool isLongPress}) {
     if (!_wordMapReady) return;
-
-    final pageNumber = details.pageNumber;
     if (pageNumber == null || pageNumber < 1) return;
 
     final pageIdx = pageNumber - 1;
     if (pageIdx >= _wordMap.length) return;
 
-    final pageOffset = details.pagePosition;
-    if (pageOffset == null) return;
-
     for (final entry in _wordMap[pageIdx]) {
-      if (entry.bounds.contains(pageOffset)) {
+      if (entry.bounds.contains(pagePosition)) {
         final word = entry.text.trim();
         if (word.isNotEmpty) {
-          final widgetPosition = details.position;
           if (isLongPress) {
             widget.onWordLongPress?.call(word, widgetPosition);
           } else {
@@ -100,11 +125,29 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
   }
 
   @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SfPdfViewer.file(
-      File(widget.filePath),
-      onTap: _handleTap,
-      onLongPress: _handleLongPress,
+    return Stack(
+      children: [
+        SfPdfViewer.file(
+          File(widget.filePath),
+          onTap: _handleTap,
+          onPdfViewerCreated: _onViewerCreated,
+        ),
+        // Transparent overlay for long press detection
+        Positioned.fill(
+          child: Listener(
+            onPointerDown: _onPointerDown,
+            onPointerUp: _onPointerUp,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
     );
   }
 }
