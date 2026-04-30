@@ -14,23 +14,20 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  // Full Ghost HUD state
   String? _tappedWord;
   Map<String, dynamic>? _entry;
   Offset? _hudPosition;
-
-  // Contextual Ghost state (long press)
-  String? _contextWord;
-  String? _contextDef;
-  Offset? _contextPosition;
-  bool _contextVisible = false;
-
   final CoreBridge _bridge = CoreBridge();
   bool _wordMapLoading = true;
   DateTime _lastTapTime = DateTime(2000);
   bool _rulerOn = false;
   bool _focusModeOn = false;
   String _sourceDocName = '';
+
+  // Contextual Ghost state
+  String? _ghostWord;
+  String? _ghostDefinition;
+  Offset? _ghostPosition;
 
   @override
   void initState() {
@@ -39,11 +36,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _bridge.load();
   }
 
-  void _onWordMapReady() {
-    setState(() => _wordMapLoading = false);
-  }
+  void _onWordMapReady() => setState(() => _wordMapLoading = false);
 
-  // ----- Full Ghost HUD (tap) -----
   void _onWordTap(String word, Offset localPosition) {
     final now = DateTime.now();
     if (now.difference(_lastTapTime).inMilliseconds < 200) return;
@@ -55,16 +49,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
 
     String jsonStr;
-    try {
-      jsonStr = _bridge.lookup(word);
-    } catch (e) {
-      _showError('Lookup failed');
-      return;
-    }
-    if (jsonStr == '[]') {
-      _showError('No definition found');
-      return;
-    }
+    try { jsonStr = _bridge.lookup(word); } catch (e) { _showError('Lookup failed'); return; }
+    if (jsonStr == '[]') { _showError('No definition found'); return; }
     try {
       final parsed = jsonDecode(jsonStr);
       if (parsed is Map<String, dynamic>) {
@@ -72,76 +58,52 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _tappedWord = word;
           _entry = parsed;
           _hudPosition = _bestHudPosition(localPosition);
-          // Dismiss contextual ghost if present
-          _contextVisible = false;
+          _ghostWord = null; // dismiss ghost
         });
       }
-    } catch (e) {
-      _showError('Parse error');
-    }
+    } catch (e) { _showError('Parse error'); }
   }
 
-  // ----- Contextual Ghost (long press) -----
-  void _onWordLongPress(String word, Offset globalPosition) {
+  void _onLongPress(String word, Offset localPosition) {
     if (_bridge.state != EngineState.ready) return;
-
     String jsonStr;
-    try {
-      jsonStr = _bridge.lookup(word);
-    } catch (_) {
-      return;
-    }
+    try { jsonStr = _bridge.lookup(word); } catch (_) { return; }
     if (jsonStr == '[]') return;
-
     try {
       final parsed = jsonDecode(jsonStr);
-      String firstDef = '';
+      String? def;
       if (parsed is Map<String, dynamic>) {
         final defs = (parsed['definitions'] as List?)?.cast<String>() ?? [];
-        firstDef = defs.isNotEmpty ? defs.first : '';
+        def = defs.isNotEmpty ? defs.first : null;
       }
-      if (firstDef.isEmpty) return;
-
       setState(() {
-        _contextWord = word;
-        _contextDef = firstDef;
-        _contextPosition = globalPosition;
-        _contextVisible = true;
-        // Dismiss full HUD if open
-        _tappedWord = null;
-        _entry = null;
-        _hudPosition = null;
+        _ghostWord = word;
+        _ghostDefinition = def;
+        _ghostPosition = Offset(localPosition.dx, localPosition.dy - 30);
+        _tappedWord = null; // dismiss full HUD
       });
     } catch (_) {}
   }
 
-  void _dismissContextualGhost() {
-    if (_contextVisible) {
-      setState(() => _contextVisible = false);
-    }
-  }
-
-  void _onNoText() {
-    _showError('No text layer (scanned PDF?)');
-  }
+  void _onNoText() => _showError('No text layer (scanned PDF?)');
 
   void _showError(String msg) {
     setState(() {
       _tappedWord = msg;
       _entry = {'word_type': '', 'definitions': [], 'synonyms': []};
       _hudPosition = const Offset(20, 100);
+      _ghostWord = null;
     });
   }
 
   void _saveToVocab() {
     if (_entry == null || _tappedWord == null) return;
     final defs = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
-    final syns = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
     final entry = VocabEntry(
       word: _tappedWord!,
       definition: defs.isNotEmpty ? defs.first : '',
       wordType: _entry!['word_type'] ?? '',
-      synonyms: syns,
+      synonyms: (_entry!['synonyms'] as List?)?.cast<String>() ?? [],
       sourceDocument: _sourceDocName,
       savedAt: DateTime.now(),
     );
@@ -155,7 +117,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final w = MediaQuery.of(context).size.width;
     final h = MediaQuery.of(context).size.height;
     const cardW = 250.0, cardH = 160.0, pad = 12.0;
-
     double left = near.dx - cardW / 2;
     double top = near.dy - cardH - 40;
     if (left < pad) left = pad;
@@ -170,6 +131,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _tappedWord = null;
       _entry = null;
       _hudPosition = null;
+      _ghostWord = null;
     });
   }
 
@@ -194,17 +156,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
         ],
       ),
-      // Listener to detect finger up and dismiss contextual ghost
-      body: Listener(
-        onPointerUp: (_) => _dismissContextualGhost(),
+      body: GestureDetector(
+        onTap: () => _dismissHUD(),
         child: Stack(
           children: [
             CustomPdfViewer(
               filePath: widget.pdfPath,
               onWordTap: _onWordTap,
-              onWordLongPress: _onWordLongPress,
               onNoText: _onNoText,
               onWordMapReady: _onWordMapReady,
+              onLongPress: _onLongPress,
             ),
             if (_wordMapLoading)
               const Positioned(
@@ -214,39 +175,44 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     color: Colors.black54,
                     child: Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('Indexing words...',
-                          style: TextStyle(color: Colors.white70)),
+                      child: Text('Indexing words...', style: TextStyle(color: Colors.white70)),
                     ),
                   ),
                 ),
               ),
             if (_focusModeOn) ...[
-              Positioned(
-                top: 0, left: 0, right: 0,
-                height: bandHeight,
-                child: Container(color: Colors.black54),
-              ),
-              Positioned(
-                bottom: 0, left: 0, right: 0,
-                height: bandHeight,
-                child: Container(color: Colors.black54),
-              ),
+              Positioned(top: 0, left: 0, right: 0, height: bandHeight,
+                  child: Container(color: Colors.black54)),
+              Positioned(bottom: 0, left: 0, right: 0, height: bandHeight,
+                  child: Container(color: Colors.black54)),
             ],
             if (_rulerOn)
               Positioned(
-                left: 16, right: 16,
-                top: screenHeight / 2,
+                left: 16, right: 16, top: screenHeight / 2,
                 child: Container(
                   height: 2,
                   decoration: BoxDecoration(
                     color: Colors.tealAccent.withOpacity(0.4),
                     boxShadow: [
-                      BoxShadow(
-                        color: Colors.tealAccent.withOpacity(0.2),
-                        blurRadius: 6,
-                        spreadRadius: 2,
-                      ),
+                      BoxShadow(color: Colors.tealAccent.withOpacity(0.2), blurRadius: 6, spreadRadius: 2),
                     ],
+                  ),
+                ),
+              ),
+            // Contextual Ghost (long‑press mini‑HUD)
+            if (_ghostWord != null && _ghostPosition != null)
+              Positioned(
+                left: _ghostPosition!.dx,
+                top: _ghostPosition!.dy,
+                child: Material(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Text(
+                      '${_ghostWord!}: ${_ghostDefinition ?? "..."}',
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
                   ),
                 ),
               ),
@@ -257,27 +223,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 top: _hudPosition!.dy,
                 child: _buildHUD(),
               ),
-            // Contextual Ghost (long press)
-            if (_contextVisible && _contextWord != null && _contextPosition != null)
-              Positioned(
-                left: _contextPosition!.dx,
-                top: _contextPosition!.dy - 40,
-                child: _buildContextualGhost(),
-              ),
           ],
         ),
       ),
     );
   }
 
-  // ----- Full HUD -----
   Widget _buildHUD() {
     final wordType = _entry!['word_type'] ?? '';
     final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
     final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
 
     return GestureDetector(
-      onTap: _dismissHUD,
+      onTap: () {},
       child: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(14),
@@ -294,19 +252,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   children: [
                     Expanded(
                       child: Text(_tappedWord!,
-                          style: const TextStyle(
-                              color: Colors.tealAccent,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
+                          style: const TextStyle(color: Colors.tealAccent, fontSize: 20, fontWeight: FontWeight.bold)),
                     ),
                     if (wordType.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: Colors.teal[800],
-                            borderRadius: BorderRadius.circular(4)),
-                        child: Text(wordType,
-                            style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        decoration: BoxDecoration(color: Colors.teal[800], borderRadius: BorderRadius.circular(4)),
+                        child: Text(wordType, style: const TextStyle(color: Colors.white, fontSize: 12)),
                       ),
                     IconButton(
                       icon: const Icon(Icons.bookmark_add, color: Colors.tealAccent, size: 20),
@@ -320,17 +272,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 if (definitions.isNotEmpty)
                   ...definitions.take(3).map((d) => Padding(
                         padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('• $d',
-                            style: const TextStyle(color: Colors.white, fontSize: 14)),
+                        child: Text('• $d', style: const TextStyle(color: Colors.white, fontSize: 14)),
                       )),
                 if (definitions.isEmpty)
-                  const Text('No definition found.',
-                      style: TextStyle(color: Colors.white70)),
+                  const Text('No definition found.', style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
                 if (synonyms.isNotEmpty)
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 2,
+                    spacing: 6, runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
                           label: Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
@@ -342,40 +291,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  // ----- Contextual Ghost (mini HUD) -----
-  Widget _buildContextualGhost() {
-    return Material(
-      elevation: 4,
-      borderRadius: BorderRadius.circular(8),
-      color: Colors.black87,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _contextWord!,
-              style: const TextStyle(
-                color: Colors.tealAccent,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                _contextDef!,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
         ),
       ),
     );
