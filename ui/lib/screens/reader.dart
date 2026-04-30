@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 import '../core_bridge.dart';
 import 'dart:convert';
+import 'dart:math';
 
 class ReaderScreen extends StatefulWidget {
   final String pdfPath;
@@ -33,29 +34,41 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
+  // ----------- TAP → PDF COORDINATE MAPPING (transformation‑based) -----------
+
   Future<void> _onViewerTap(Offset globalPosition) async {
     if (_document == null || _controller == null) return;
 
-    // 1. Convert global tap to widget-local coordinates
+    // 1. Local widget coordinates
     final RenderBox? box =
         _viewerKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return;
-    final localPosition = box.globalToLocal(globalPosition);
+    final local = box.globalToLocal(globalPosition);
 
-    // 2. Convert widget-local coordinates to PDF page coordinates
-    final pageOffset = _controller!.toPageCoordinate(localPosition);
-    if (pageOffset == null) return;
+    // 2. Use the viewer's transformation to map local → PDF page coordinates
+    final Matrix4 transform = _controller!.transformation;
+    // The inverse may fail if the matrix is singular; guard it.
+    Matrix4 inverse;
+    try {
+      inverse = Matrix4.inverted(transform);
+    } catch (_) {
+      return;
+    }
 
-    // 3. Determine current page (nullable, default to 1)
-    final pageNumber = _controller!.pageNumber ?? 1;
+    // Transform local offset into PDF coordinate space
+    final Vector4 pdfPoint = inverse.transform(Vector4(local.dx, local.dy, 0, 1));
+    final Offset pageOffset = Offset(pdfPoint.x, pdfPoint.y);
+
+    // 3. Determine current page (use default 1 if null)
+    final int pageNumber = _controller!.pageNumber ?? 1;
     if (pageNumber < 1 || pageNumber > _document!.pages.length) return;
 
-    // 4. Load text layer for current page
+    // 4. Load text layer for the page
     final page = _document!.pages[pageNumber - 1];
-    final pageText = await page.loadText();
+    final PdfPageText? pageText = await page.loadText();
     if (pageText == null) return;
 
-    // 5. Hit-test: find word whose bounding rect contains the page offset
+    // 5. Hit‑test every word (safe, uses only the stable `words` list)
     String? word;
     for (final w in pageText.words) {
       if (w.rect.contains(pageOffset)) {
@@ -68,6 +81,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _fetchDefinition(word, pageOffset);
     }
   }
+
+  // ----------- DEFINITION FETCH & HUD -----------
 
   void _fetchDefinition(String word, Offset tapPos) {
     String jsonStr;
@@ -89,7 +104,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         setState(() {
           _tappedWord = word;
           _entry = parsed;
-          _hudPosition = _calculateHudPosition(tapPos);
+          _hudPosition = _bestHudPosition(tapPos);
         });
       }
     } catch (e) {
@@ -101,25 +116,22 @@ class _ReaderScreenState extends State<ReaderScreen> {
     setState(() {
       _tappedWord = msg;
       _entry = {'word_type': '', 'definitions': [], 'synonyms': []};
-      _hudPosition = const Offset(20, 80);
+      _hudPosition = const Offset(20, 100);
     });
   }
 
-  Offset _calculateHudPosition(Offset tap) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
-    const double hudWidth = 250;
-    const double hudHeight = 150;
+  Offset _bestHudPosition(Offset near) {
+    final w = MediaQuery.of(context).size.width;
+    final h = MediaQuery.of(context).size.height;
+    const cardW = 250.0, cardH = 160.0, pad = 12.0;
 
-    double left = tap.dx - hudWidth / 2;
-    double top = tap.dy - hudHeight - 40;
-
-    if (left < 16) left = 16;
-    if (left + hudWidth > screenWidth - 16) left = screenWidth - hudWidth - 16;
-    if (top < 80) top = tap.dy + 40;
-    if (top + hudHeight > screenHeight - 40) top = screenHeight - hudHeight - 40;
-
-    return Offset(left, top);
+    double left = near.dx - cardW / 2;
+    double top = near.dy - cardH - 40;
+    if (left < pad) left = pad;
+    if (left + cardW > w - pad) left = w - cardW - pad;
+    if (top < pad) top = near.dy + 40;
+    if (top + cardH > h - pad) top = h - cardH - pad;
+    return Offset(left, max(pad, top));
   }
 
   void _dismissHUD() {
@@ -129,6 +141,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
       _hudPosition = null;
     });
   }
+
+  // ----------- BUILD -----------
 
   @override
   Widget build(BuildContext context) {
@@ -182,28 +196,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        _tappedWord!,
-                        style: const TextStyle(
-                          color: Colors.tealAccent,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: Text(_tappedWord!,
+                          style: const TextStyle(
+                              color: Colors.tealAccent, fontSize: 20, fontWeight: FontWeight.bold)),
                     ),
                     if (wordType.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.teal[800],
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          wordType,
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                        ),
+                            color: Colors.teal[800], borderRadius: BorderRadius.circular(4)),
+                        child: Text(wordType,
+                            style: const TextStyle(color: Colors.white, fontSize: 12)),
                       ),
-                    const SizedBox(width: 8),
                     IconButton(
                       icon: const Icon(Icons.bookmark_border, color: Colors.white70, size: 18),
                       onPressed: () {},
@@ -216,18 +220,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 if (definitions.isNotEmpty)
                   ...definitions.take(3).map((d) => Padding(
                         padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          '• $d',
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                        ),
+                        child: Text('• $d',
+                            style: const TextStyle(color: Colors.white, fontSize: 14)),
                       )),
                 if (definitions.isEmpty)
-                  const Text('No definition found.', style: TextStyle(color: Colors.white70)),
+                  const Text('No definition found.',
+                      style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
                 if (synonyms.isNotEmpty)
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 2,
+                    spacing: 6, runSpacing: 2,
                     children: synonyms.take(6).map((s) => Chip(
                           label: Text(s, style: const TextStyle(fontSize: 11)),
                           backgroundColor: Colors.teal[700],
