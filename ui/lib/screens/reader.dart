@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../core_bridge.dart';
 import '../widgets/custom_pdf_viewer.dart';
 import '../services/vocab_bank.dart';
+import '../services/pdf_text_service.dart';
+import '../services/tts_service.dart';
 import 'dart:convert';
 import 'dart:math';
 
@@ -24,16 +26,22 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _focusModeOn = false;
   String _sourceDocName = '';
 
-  // Contextual Ghost state
   String? _ghostWord;
   String? _ghostDefinition;
   Offset? _ghostPosition;
+
+  // TTS
+  final TtsService _tts = TtsService();
+  bool _ttsAvailable = false;
+  bool _ttsActive = false;
 
   @override
   void initState() {
     super.initState();
     _sourceDocName = widget.pdfPath.split('/').last;
     _bridge.load();
+    _tts.onError = (m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+    _tts.init().then((ok) => setState(() => _ttsAvailable = ok));
   }
 
   void _onWordMapReady() => setState(() => _wordMapLoading = false);
@@ -43,10 +51,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (now.difference(_lastTapTime).inMilliseconds < 200) return;
     _lastTapTime = now;
 
-    if (_bridge.state != EngineState.ready) {
-      _showError('Engine not ready');
-      return;
-    }
+    if (_bridge.state != EngineState.ready) { _showError('Engine not ready'); return; }
 
     String jsonStr;
     try { jsonStr = _bridge.lookup(word); } catch (e) { _showError('Lookup failed'); return; }
@@ -58,7 +63,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
           _tappedWord = word;
           _entry = parsed;
           _hudPosition = _bestHudPosition(localPosition);
-          _ghostWord = null; // dismiss ghost
+          _ghostWord = null;
         });
       }
     } catch (e) { _showError('Parse error'); }
@@ -80,9 +85,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
         _ghostWord = word;
         _ghostDefinition = def;
         _ghostPosition = Offset(localPosition.dx, localPosition.dy - 30);
-        _tappedWord = null; // dismiss full HUD
+        _tappedWord = null;
       });
     } catch (_) {}
+  }
+
+  Future<void> _toggleReadAloud() async {
+    if (_ttsActive) {
+      await _tts.stop();
+      setState(() => _ttsActive = false);
+      return;
+    }
+    // Read current visible page
+    try {
+      final textService = PdfTextService(widget.pdfPath);
+      final texts = await textService.getPageTexts();
+      if (texts.isEmpty) return;
+      // We'll read the first page for now; future: detect visible page from viewer
+      final pageText = texts.isNotEmpty ? texts[0] : '';
+      if (pageText.trim().isEmpty) return;
+      await _tts.speak(pageText);
+      if (mounted) setState(() => _ttsActive = true);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Read aloud failed: $e')));
+    }
   }
 
   void _onNoText() => _showError('No text layer (scanned PDF?)');
@@ -136,6 +162,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   @override
+  void dispose() {
+    _tts.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final bandHeight = screenHeight * 0.35;
@@ -144,6 +176,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
       appBar: AppBar(
         title: const Text('Reader'),
         actions: [
+          if (_ttsAvailable)
+            IconButton(
+              icon: Icon(_ttsActive ? Icons.volume_up : Icons.volume_down),
+              tooltip: _ttsActive ? 'Stop reading' : 'Read aloud',
+              onPressed: _toggleReadAloud,
+            ),
           IconButton(
             icon: Icon(_rulerOn ? Icons.remove_red_eye : Icons.remove_red_eye_outlined),
             tooltip: 'Reading Ruler',
@@ -199,7 +237,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ),
                 ),
               ),
-            // Contextual Ghost (long‑press mini‑HUD)
             if (_ghostWord != null && _ghostPosition != null)
               Positioned(
                 left: _ghostPosition!.dx,
@@ -216,7 +253,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ),
                 ),
               ),
-            // Full Ghost HUD
             if (_tappedWord != null && _entry != null && _hudPosition != null)
               Positioned(
                 left: _hudPosition!.dx,
