@@ -99,7 +99,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final response = await http.get(uri);
       if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
       final dir = await getApplicationDocumentsDirectory();
-      final fileName = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'document.pdf';
+      // Mutable file name
+      var fileName = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'document.pdf';
       if (!fileName.endsWith('.pdf')) fileName = '$fileName.pdf';
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(response.bodyBytes);

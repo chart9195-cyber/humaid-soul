@@ -195,7 +195,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
     return PopScope(
       canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
+      onPopInvoked: (didPop) {
         if (didPop) _savePosition();
       },
       child: Scaffold(
