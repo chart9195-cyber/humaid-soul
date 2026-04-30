@@ -12,7 +12,7 @@ dependencies:
   ffi: ^2.1.0
   path_provider: ^2.1.0
   file_picker: ^8.0.0
-  syncfusion_flutter_pdf: ^25.1.35
+  syncfusion_flutter_pdfviewer: ^25.1.35
 
 dev_dependencies:
   flutter_test:
