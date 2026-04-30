@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core_bridge.dart';
 import '../widgets/custom_pdf_viewer.dart';
-import '../vocab.dart';
+import '../services/vocab_bank.dart';
 import 'dart:convert';
 import 'dart:math';
 
@@ -21,6 +21,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _wordMapLoading = true;
   DateTime _lastTapTime = DateTime(2000);
   bool _rulerOn = false;
+  bool _focusModeOn = false;
   String _sourceDocName = '';
 
   @override
@@ -123,14 +124,24 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final bandHeight = screenHeight * 0.35; // clear central 30%, dim top & bottom
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reader'),
         actions: [
+          // Reading Ruler toggle
           IconButton(
             icon: Icon(_rulerOn ? Icons.remove_red_eye : Icons.remove_red_eye_outlined),
             tooltip: 'Reading Ruler',
             onPressed: () => setState(() => _rulerOn = !_rulerOn),
+          ),
+          // Focus Mode toggle (reading band)
+          IconButton(
+            icon: Icon(_focusModeOn ? Icons.center_focus_strong : Icons.center_focus_weak),
+            tooltip: 'Focus Mode',
+            onPressed: () => setState(() => _focusModeOn = !_focusModeOn),
           ),
         ],
       ),
@@ -156,10 +167,28 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 ),
               ),
             ),
+          // Focus Mode: two dark bars dimming the outer areas
+          if (_focusModeOn) ...[
+            Positioned(
+              top: 0, left: 0, right: 0,
+              height: bandHeight,
+              child: Container(
+                color: Colors.black54,
+              ),
+            ),
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              height: bandHeight,
+              child: Container(
+                color: Colors.black54,
+              ),
+            ),
+          ],
+          // Reading Ruler: subtle horizontal line in the middle
           if (_rulerOn)
             Positioned(
               left: 16, right: 16,
-              top: MediaQuery.of(context).size.height / 2,
+              top: screenHeight / 2,
               child: Container(
                 height: 2,
                 decoration: BoxDecoration(
