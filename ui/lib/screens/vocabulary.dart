@@ -39,7 +39,8 @@ class _VocabScreenState extends State<VocabScreen> {
                   itemBuilder: (context, i) {
                     final entry = _entries[i];
                     return ListTile(
-                      title: Text(entry.word, style: const TextStyle(color: Colors.tealAccent)),
+                      title: Text(entry.word,
+                          style: const TextStyle(color: Colors.tealAccent)),
                       subtitle: Text(entry.definition,
                           maxLines: 2, overflow: TextOverflow.ellipsis),
                       trailing: Text(entry.savedAt.toString().substring(0, 10)),

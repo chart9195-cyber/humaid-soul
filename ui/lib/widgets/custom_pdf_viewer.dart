@@ -7,7 +7,7 @@ class CustomPdfViewer extends StatefulWidget {
   final String filePath;
   final void Function(String word, Offset localPosition)? onWordTap;
   final void Function()? onNoText;
-  final void Function(bool success)? onWordMapReady;
+  final void Function()? onWordMapReady;
 
   const CustomPdfViewer({
     super.key,
@@ -24,7 +24,6 @@ class CustomPdfViewer extends StatefulWidget {
 class _CustomPdfViewerState extends State<CustomPdfViewer> {
   List<List<WordEntry>> _wordMap = [];
   bool _wordMapReady = false;
-  bool _wordMapSuccess = false;
 
   @override
   void initState() {
@@ -34,14 +33,8 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
 
   Future<void> _buildWordMap() async {
     try {
-      final file = File(widget.filePath);
-      if (!await file.exists()) throw Exception('PDF file not found.');
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) throw Exception('PDF file is empty.');
-
+      final bytes = await File(widget.filePath).readAsBytes();
       final doc = sf_pdf.PdfDocument(inputBytes: bytes);
-      if (doc.pages.count == 0) throw Exception('PDF has no pages.');
-
       final extractor = sf_pdf.PdfTextExtractor(doc);
       final lines = extractor.extractTextLines();
 
@@ -58,18 +51,17 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
         }
       }
       doc.dispose();
-      _wordMapSuccess = true;
+      _wordMapReady = true;
+      widget.onWordMapReady?.call();
     } catch (e) {
       debugPrint('Word map build failed: $e');
-      _wordMapSuccess = false;
-      _wordMap = []; // ensure empty
+      _wordMapReady = true;
+      widget.onWordMapReady?.call();
     }
-    _wordMapReady = true;
-    widget.onWordMapReady?.call(_wordMapSuccess);
   }
 
   void _onTap(PdfGestureDetails details) {
-    if (!_wordMapReady || !_wordMapSuccess) return;
+    if (!_wordMapReady) return;
 
     final pageNumber = details.pageNumber;
     if (pageNumber == null || pageNumber < 1) return;

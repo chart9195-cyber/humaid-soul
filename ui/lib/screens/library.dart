@@ -55,7 +55,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final count = allWords.where((w) => w.sourceDocument == docName).length;
       counts[doc] = count;
     }
-    setState(() => _wordCounts = counts);
+    if (mounted) setState(() => _wordCounts = counts);
   }
 
   Future<void> _importPDF() async {
@@ -85,7 +85,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context,
       MaterialPageRoute(builder: (_) => ReaderScreen(pdfPath: path)),
     );
-    // Refresh word counts when returning from reader
     _updateWordCounts();
   }
 
