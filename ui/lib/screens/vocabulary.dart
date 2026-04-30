@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/vocab_bank.dart';
+import '../vocab.dart';
 
 class VocabScreen extends StatefulWidget {
   const VocabScreen({super.key});

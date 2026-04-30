@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import '../services/vocab_bank.dart';
+import '../vocab.dart';
 import 'reader.dart';
 
 class LibraryScreen extends StatefulWidget {

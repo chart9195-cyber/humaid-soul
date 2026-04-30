@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core_bridge.dart';
 import '../widgets/custom_pdf_viewer.dart';
-import '../services/vocab_bank.dart';
+import '../vocab.dart';
 import 'dart:convert';
 import 'dart:math';
 
