@@ -20,12 +20,13 @@ class CustomPdfViewer extends StatefulWidget {
 
 class _CustomPdfViewerState extends State<CustomPdfViewer> {
   late PdfDocument _pdfDoc;
-  List<ui.Image> _pageImages = [];
-  List<List<WordLocation>> _pageWords = []; // words per page
-  int _currentPage = 0;
-  bool _loading = true;
-  double _imageScale = 1.0;
-  Offset _imageOffset = Offset.zero; // top-left of image in widget coords
+  int _pageCount = 0;
+  double _pageWidth = 0, _pageHeight = 0;
+  List<List<WordLocation>> _pageWords = [];
+  final Map<int, ui.Image> _pageImages = {};
+  final Map<int, Future<ui.Image>?> _renderFutures = {};
+  final ScrollController _scrollController = ScrollController();
+  double _screenWidth = 0;
 
   @override
   void initState() {
@@ -37,102 +38,149 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
     final file = File(widget.filePath);
     final bytes = await file.readAsBytes();
     _pdfDoc = PdfDocument.fromBytes(bytes);
+    _pageCount = _pdfDoc.pages.length;
+    final firstPage = _pdfDoc.pages[0];
+    _pageWidth = firstPage.mediaBox.width;
+    _pageHeight = firstPage.mediaBox.height;
     _buildWordMap();
-    await _renderCurrentPage();
-    setState(() => _loading = false);
+    await _preRenderVisible(0);
+    setState(() {});
   }
 
   void _buildWordMap() {
-    _pageWords = List.generate(_pdfDoc.pages.length, (_) => []);
-    for (int i = 0; i < _pdfDoc.pages.length; i++) {
+    _pageWords = List.generate(_pageCount, (_) => []);
+    for (int i = 0; i < _pageCount; i++) {
       final page = _pdfDoc.pages[i];
       final text = page.extractText();
       if (text != null) {
-        for (final segment in text.segments) {
+        for (final seg in text.segments) {
           _pageWords[i].add(WordLocation(
-            word: segment.text,
-            rect: segment.boundingBox,
+            word: seg.text,
+            rect: seg.boundingBox,
           ));
         }
       }
     }
   }
 
-  Future<void> _renderCurrentPage() async {
-    final page = _pdfDoc.pages[_currentPage];
-    final pageRect = page.mediaBox;
-    // Render at 2x device pixel ratio for clarity
-    final viewScale = 2.0 * MediaQuery.of(context).devicePixelRatio;
-    final width = (pageRect.width * viewScale).round();
-    final height = (pageRect.height * viewScale).round();
-    final image = await page.render(
+  Future<ui.Image> _renderPage(int pageIndex) async {
+    final page = _pdfDoc.pages[pageIndex];
+    final viewScale = 1.5 * MediaQuery.of(context).devicePixelRatio;
+    final width = max(200, (_pageWidth * viewScale).round());
+    final height = max(200, (_pageHeight * viewScale).round());
+    final pngData = await page.render(
       width: width,
       height: height,
       format: PdfPageImageFormat.png,
     );
-    if (image != null) {
-      final uiImage = await decodeImageFromList(image.bytes);
-      if (!mounted) return;
-      setState(() {
-        _pageImages.add(uiImage);
-      });
+    if (pngData == null) throw Exception('Render failed');
+    final image = await decodeImageFromList(pngData.bytes);
+    return image;
+  }
+
+  Future<void> _preRenderVisible(int centerPage) async {
+    // Render a small window around the visible page
+    final start = max(0, centerPage - 2);
+    final end = min(_pageCount, centerPage + 3);
+    for (int i = start; i < end; i++) {
+      if (!_pageImages.containsKey(i) && _renderFutures[i] == null) {
+        final future = _renderPage(i);
+        _renderFutures[i] = future;
+        final image = await future;
+        if (!mounted) return;
+        _pageImages[i] = image;
+        _renderFutures[i] = null;
+      }
     }
+    // Dispose images not in the window
+    final keep = {start, end - 1, start + 1, end - 2, centerPage};
+    _pageImages.keys
+        .where((k) => !keep.contains(k))
+        .toList()
+        .forEach((k) {
+      _pageImages[k]?.dispose();
+      _pageImages.remove(k);
+    });
+    setState(() {});
   }
 
   void _onTapUp(TapUpDetails details) {
-    if (_loading || _pageImages.isEmpty) return;
-    final size = context.size;
-    if (size == null) return;
+    if (_screenWidth == 0) return;
+    final localPos = details.localPosition;
+    final pageIndex = (localPos.dy / (_screenWidth * (_pageHeight / _pageWidth))).floor();
+    if (pageIndex < 0 || pageIndex >= _pageCount) return;
 
-    // Determine which page image is currently visible (simplified: only page 0, later scroll)
-    final image = _pageImages[_currentPage];
-    final pageWidth = _pdfDoc.pages[_currentPage].mediaBox.width;
-    final pageHeight = _pdfDoc.pages[_currentPage].mediaBox.height;
+    final pageImage = _pageImages[pageIndex];
+    if (pageImage == null) return;
 
-    // Calculate image display rect (fit width)
-    final displayWidth = size.width;
-    final displayHeight = (pageHeight / pageWidth) * displayWidth;
-    final offsetY = (size.height - displayHeight) / 2;
-    final imageRect = Rect.fromLTWH(0, offsetY, displayWidth, displayHeight);
+    final imageHeight = _screenWidth * (_pageHeight / _pageWidth);
+    final yInPage = localPos.dy - pageIndex * imageHeight;
+    final xInPage = localPos.dx;
 
-    // Convert tap position to PDF coordinates
-    final tapLocal = details.localPosition;
-    final pdfX = (tapLocal.dx - imageRect.left) / imageRect.width * pageWidth;
-    final pdfY = (tapLocal.dy - imageRect.top) / imageRect.height * pageHeight;
+    // Convert to PDF coordinates (bottom‑left origin in PDF, but we treat as top‑left)
+    final scaleX = _pageWidth / _screenWidth;
+    final scaleY = _pageHeight / imageHeight;
+    final pdfX = xInPage * scaleX;
+    final pdfY = yInPage * scaleY;
 
-    // Hit test words
-    for (final word in _pageWords[_currentPage]) {
-      final rect = word.rect;
-      if (rect.contains(pdfX, pdfY)) {
-        widget.onWordTap?.call(word.word, tapLocal);
+    for (final word in _pageWords[pageIndex]) {
+      if (word.rect.contains(pdfX, pdfY)) {
+        widget.onWordTap?.call(word.word, details.localPosition);
         break;
       }
     }
   }
 
   @override
+  void dispose() {
+    _scrollController.dispose();
+    _pdfDoc.dispose();
+    for (final img in _pageImages.values) {
+      img.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    if (_pageCount == 0) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_pageImages.isEmpty) {
-      return const Center(child: Text('No pages'));
-    }
-    final image = _pageImages[_currentPage];
-    final page = _pdfDoc.pages[_currentPage];
-    final aspect = page.mediaBox.height / page.mediaBox.width;
-
     return LayoutBuilder(builder: (context, constraints) {
-      final displayWidth = constraints.maxWidth;
-      final displayHeight = displayWidth * aspect;
+      _screenWidth = constraints.maxWidth;
+      final imageHeight = _screenWidth * (_pageHeight / _pageWidth);
+      final totalHeight = imageHeight * _pageCount;
+
+      // Pre-render based on scroll
+      _scrollController.addListener(() {
+        final scrollOffset = _scrollController.offset;
+        final centerPage = (scrollOffset / imageHeight).floor();
+        _preRenderVisible(centerPage);
+      });
+
       return GestureDetector(
         onTapUp: _onTapUp,
-        child: Center(
-          child: SizedBox(
-            width: displayWidth,
-            height: displayHeight,
-            child: RawImage(image: image, fit: BoxFit.contain),
-          ),
+        child: ListView.builder(
+          controller: _scrollController,
+          itemCount: _pageCount,
+          itemExtent: imageHeight,
+          itemBuilder: (context, index) {
+            final image = _pageImages[index];
+            if (image != null) {
+              return SizedBox(
+                width: _screenWidth,
+                height: imageHeight,
+                child: RawImage(image: image, fit: BoxFit.cover),
+              );
+            } else {
+              return Container(
+                width: _screenWidth,
+                height: imageHeight,
+                color: Colors.grey[900],
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
+          },
         ),
       );
     });
@@ -141,6 +189,6 @@ class _CustomPdfViewerState extends State<CustomPdfViewer> {
 
 class WordLocation {
   final String word;
-  final Rect rect; // in PDF coordinates (bottom-left origin, but we treat as top-left for simplicity)
+  final Rect rect;
   WordLocation({required this.word, required this.rect});
 }
