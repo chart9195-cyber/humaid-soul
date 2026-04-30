@@ -4,14 +4,9 @@ use serde::Serialize;
 use std::io::Read;
 use std::sync::Mutex;
 
-// Global dictionary connection protected by a mutex.
 static DICTIONARY: OnceCell<Mutex<Connection>> = OnceCell::new();
 
-/// Load the dictionary from a Zstandard‑compressed SQLite file.
-/// Decompresses the file, writes a temporary SQLite database,
-/// opens a connection, and stores it in the global dictionary.
 pub fn load_dictionary(path_zst: &str) -> bool {
-    // Read compressed file.
     let mut file = match std::fs::File::open(path_zst) {
         Ok(f) => f,
         Err(e) => {
@@ -19,13 +14,10 @@ pub fn load_dictionary(path_zst: &str) -> bool {
             return false;
         }
     };
-
     let mut compressed = Vec::new();
     if file.read_to_end(&mut compressed).is_err() {
         return false;
     }
-
-    // Decompress using streaming decoder.
     let mut decoder = match zstd::stream::Decoder::new(&compressed[..]) {
         Ok(d) => d,
         Err(e) => {
@@ -33,18 +25,14 @@ pub fn load_dictionary(path_zst: &str) -> bool {
             return false;
         }
     };
-
     let mut decompressed = Vec::new();
     if decoder.read_to_end(&mut decompressed).is_err() {
         return false;
     }
-
-    // Write temporary file (Android's /tmp is writable).
     let temp_path = "/tmp/soul_dict_temp.db";
     if std::fs::write(temp_path, &decompressed).is_err() {
         return false;
     }
-
     let conn = match Connection::open(temp_path) {
         Ok(c) => c,
         Err(e) => {
@@ -52,10 +40,7 @@ pub fn load_dictionary(path_zst: &str) -> bool {
             return false;
         }
     };
-
-    // Enable WAL mode for concurrent reads (not strictly needed with Mutex but harmless).
     conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
-
     DICTIONARY.set(Mutex::new(conn)).is_ok()
 }
 
@@ -67,36 +52,30 @@ struct WordEntry {
     synonyms: Vec<String>,
 }
 
-/// Look up a word: direct match → lemma → fuzzy fallback.
 pub fn lookup(word: &str) -> String {
     let guard = match DICTIONARY.get() {
         Some(m) => m.lock().unwrap(),
         None => return "[]".to_string(),
     };
     let conn = &*guard;
-
     if let Some(entry) = direct_lookup(conn, word) {
         return serde_json::to_string(&entry).unwrap_or_default();
     }
-
     let lemma = lemmatize_impl(conn, word);
     if lemma != word {
         if let Some(entry) = direct_lookup(conn, &lemma) {
             return serde_json::to_string(&entry).unwrap_or_default();
         }
     }
-
     let candidates = fuzzy_impl(conn, word, 1);
     if let Some(candidate) = candidates.first() {
         if let Some(entry) = direct_lookup(conn, candidate) {
             return serde_json::to_string(&entry).unwrap_or_default();
         }
     }
-
     "[]".to_string()
 }
 
-/// Return the lemma (base form) of a given word.
 pub fn lemmatize(word: &str) -> String {
     let guard = match DICTIONARY.get() {
         Some(m) => m.lock().unwrap(),
@@ -105,7 +84,6 @@ pub fn lemmatize(word: &str) -> String {
     lemmatize_impl(&*guard, word)
 }
 
-/// Fuzzy search: returns up to `max_results` closest matches.
 pub fn fuzzy_search(word: &str, max_results: usize) -> String {
     let guard = match DICTIONARY.get() {
         Some(m) => m.lock().unwrap(),
@@ -115,9 +93,7 @@ pub fn fuzzy_search(word: &str, max_results: usize) -> String {
     serde_json::to_string(&matches).unwrap_or_default()
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers (expect a concrete &Connection)
-// ---------------------------------------------------------------------------
+// ---- internal helpers ----
 
 fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
     let mut stmt = conn
@@ -129,7 +105,6 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
              WHERE w.word = ?1 COLLATE NOCASE",
         )
         .ok()?;
-
     let rows = stmt
         .query_map(params![word], |row| {
             Ok((
@@ -140,76 +115,95 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
             ))
         })
         .ok()?;
-
     let mut word_name = String::new();
     let mut word_type = String::new();
     let mut definitions: Vec<String> = Vec::new();
     let mut synonyms: Vec<String> = Vec::new();
-
     for row in rows.flatten() {
         word_name = row.0;
         word_type = row.1.unwrap_or_default();
         if let Some(def) = row.2 {
-            if !definitions.contains(&def) {
-                definitions.push(def);
-            }
+            if !definitions.contains(&def) { definitions.push(def); }
         }
         if let Some(syn) = row.3 {
-            if syn != word_name && !synonyms.contains(&syn) {
-                synonyms.push(syn);
-            }
+            if syn != word_name && !synonyms.contains(&syn) { synonyms.push(syn); }
         }
     }
-
-    if word_name.is_empty() {
-        return None;
-    }
-
-    Some(WordEntry {
-        word: word_name,
-        word_type,
-        definitions,
-        synonyms,
-    })
+    if word_name.is_empty() { return None; }
+    Some(WordEntry { word: word_name, word_type, definitions, synonyms })
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
-    match conn.query_row(
+    // 1. Check lemma_map for irregulars + manually added forms
+    if let Ok(lemma) = conn.query_row(
         "SELECT lemma FROM lemma_map WHERE inflected = ?1",
         params![word],
         |row| row.get::<_, String>(0),
     ) {
-        Ok(lemma) => lemma,
-        Err(_) => word.to_string(),
+        return lemma;
     }
+    // 2. Apply simple suffix‑stripping stemmer for regular inflections
+    let lower = word.to_lowercase();
+    let stemmed = english_regular_stem(&lower);
+    if stemmed != lower {
+        // verify that the stemmed form exists in words table
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM words WHERE word = ?1",
+                params![stemmed],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if exists {
+            return stemmed;
+        }
+    }
+    word.to_string()
+}
+
+/// A conservative, lightweight English stemmer that strips common suffixes.
+/// Not as aggressive as Porter; only removes endings that reliably indicate a regular inflection.
+fn english_regular_stem(word: &str) -> String {
+    // order matters – strip longer suffixes first
+    let suffixes = [
+        ("nesses", ""), ("ingly", ""), ("ations", "ate"), ("tions", "t"),
+        ("sses", "ss"), ("ships", "ship"), ("ments", "ment"),
+        ("ness", ""), ("ing", ""), ("ed", ""), ("s", ""),
+        ("ied", "y"), ("ves", "f"),
+    ];
+    for (suffix, replacement) in suffixes.iter() {
+        if word.ends_with(suffix) && word.len() > suffix.len() + 1 {
+            let stem = format!("{}{}", &word[..word.len()-suffix.len()], replacement);
+            // avoid over‑stemming; just return the stem
+            return stem;
+        }
+    }
+    word.to_string()
 }
 
 fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> {
-    let first_char = word
-        .chars()
-        .next()
+    let first_char = word.chars().next()
         .map(|c| format!("{}%", c))
         .unwrap_or_else(|| "%".to_string());
-
     let mut stmt = conn
         .prepare("SELECT DISTINCT word FROM words WHERE word LIKE ?1 LIMIT 200")
         .unwrap();
-
     let candidates: Vec<String> = stmt
         .query_map(params![first_char], |row| row.get::<_, String>(0))
         .unwrap()
         .flatten()
         .collect();
-
     let mut scored: Vec<(f64, String)> = candidates
         .into_iter()
         .map(|candidate| {
-            let dist =
-                strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
+            let dist = strsim::normalized_levenshtein(
+                &word.to_lowercase(),
+                &candidate.to_lowercase(),
+            );
             (dist, candidate)
         })
         .collect();
-
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(max_results);
     scored.into_iter().map(|(_, w)| w).collect()
