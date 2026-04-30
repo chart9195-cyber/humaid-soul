@@ -83,11 +83,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   void _saveToVocab() {
     if (_entry == null || _tappedWord == null) return;
+    final defs = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final syns = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
     final entry = VocabEntry(
       word: _tappedWord!,
-      definition: (_entry!['definitions'] as List?)?.firstOrNull ?? '',
+      definition: defs.isNotEmpty ? defs.first : '',
       wordType: _entry!['word_type'] ?? '',
-      synonyms: (_entry!['synonyms'] as List?)?.cast<String>() ?? [],
+      synonyms: syns,
       sourceDocument: _sourceDocName,
       savedAt: DateTime.now(),
     );
@@ -155,7 +157,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
               ),
             ),
           if (_rulerOn)
-            // Reading Ruler: horizontal line in the middle of the viewport
             Positioned(
               left: 16, right: 16,
               top: MediaQuery.of(context).size.height / 2,
