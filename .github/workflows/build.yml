@@ -86,6 +86,51 @@ jobs:
         with:
           flutter-version: '3.22.0'
           channel: stable
+
+      # ===== REGENERATE ANDROID PROJECT =====
+      - name: Generate Android project
+        run: |
+          # Always regenerate from scratch to guarantee a clean structure
+          rm -rf ui/android
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          flutter create --project-name humaid_soul_ui --org com.humaid.soul temp_app
+          cd -
+          cp -r "$TEMP_DIR/temp_app/android" ui/
+          # Copy gradle wrapper to the expected location
+          cp "$TEMP_DIR/temp_app/gradlew" ui/android/ 2>/dev/null || true
+          cp "$TEMP_DIR/temp_app/gradlew.bat" ui/android/ 2>/dev/null || true
+          cp -r "$TEMP_DIR/temp_app/gradle" ui/android/ 2>/dev/null || true
+          rm -rf "$TEMP_DIR"
+          # Ensure gradlew is executable
+          chmod +x ui/android/gradlew
+
+      # ===== CONFIGURE SDK FLOOR =====
+      - name: Configure Android SDK floor
+        run: |
+          # Set minSdkVersion in local.properties — the Flutter Gradle Plugin reads this
+          echo "flutter.minSdkVersion=24" >> ui/android/local.properties
+          echo "flutter.compileSdkVersion=36" >> ui/android/local.properties
+
+          # ProGuard rules for Syncfusion
+          mkdir -p ui/android/app/proguard
+          echo "-keep class com.syncfusion.** { *; }" > ui/android/app/proguard/proguard-rules.pro
+          echo "-dontwarn com.syncfusion.**" >> ui/android/app/proguard/proguard-rules.pro
+
+          # Add PDF intent filter to main manifest
+          MANIFEST="ui/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i '/<\/activity>/i \
+            <intent-filter> \
+                <action android:name="android.intent.action.VIEW"/> \
+                <category android:name="android.intent.category.DEFAULT"/> \
+                <category android:name="android.intent.category.BROWSABLE"/> \
+                <data android:scheme="file"/> \
+                <data android:scheme="content"/> \
+                <data android:mimeType="application/pdf"/> \
+            </intent-filter>' "$MANIFEST"
+          fi
+
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
