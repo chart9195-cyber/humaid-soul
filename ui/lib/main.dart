@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'screens/library.dart';
 import 'screens/test_lookup.dart';
 import 'screens/vocabulary.dart';
+import 'screens/search_screen.dart';
+import 'screens/doc_stats_screen.dart';
 
 void main() {
   runApp(const HumaidSoulApp());
@@ -24,6 +26,18 @@ class HumaidSoulApp extends StatelessWidget {
         '/': (context) => const LibraryScreen(),
         '/test': (context) => const TestLookupScreen(),
         '/vocab': (context) => const VocabScreen(),
+        '/search': (context) => const SearchScreen(),
+      },
+      onGenerateRoute: (settings) {
+        // Handle routes with arguments
+        if (settings.name == '/docstats') {
+          final args = settings.arguments as Map<String, dynamic>;
+          final pdfPath = args['pdfPath'] as String;
+          return MaterialPageRoute(
+            builder: (_) => DocStatsScreen(pdfPath: pdfPath),
+          );
+        }
+        return null;
       },
       debugShowCheckedModeBanner: false,
     );

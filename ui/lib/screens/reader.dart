@@ -11,7 +11,8 @@ import 'dart:math';
 
 class ReaderScreen extends StatefulWidget {
   final String pdfPath;
-  const ReaderScreen({super.key, required this.pdfPath});
+  final int? initialPage;                     // <-- new parameter
+  const ReaderScreen({super.key, required this.pdfPath, this.initialPage});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -50,12 +51,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _restorePosition() async {
-    final page = await ReadingPosition.get(widget.pdfPath);
-    if (page != null && page > 0) {
-      // Will be applied after viewer is ready
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _viewerKey.currentState?.jumpToPage(page);
-      });
+    // If an initial page was passed, jump there after viewer ready
+    if (widget.initialPage != null && _viewerKey.currentState != null) {
+      _viewerKey.currentState!.jumpToPage(widget.initialPage!);
     }
   }
 
@@ -228,6 +226,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
               icon: Icon(_focusModeOn ? Icons.center_focus_strong : Icons.center_focus_weak),
               tooltip: 'Focus Mode',
               onPressed: () => setState(() => _focusModeOn = !_focusModeOn),
+            ),
+            IconButton(
+              icon: const Icon(Icons.analytics),
+              tooltip: 'Document Stats',
+              onPressed: () => Navigator.pushNamed(context, '/docstats', arguments: {'pdfPath': widget.pdfPath}),
             ),
           ],
         ),

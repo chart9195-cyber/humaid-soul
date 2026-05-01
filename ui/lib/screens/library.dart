@@ -99,7 +99,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final response = await http.get(uri);
       if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
       final dir = await getApplicationDocumentsDirectory();
-      // Mutable file name
       var fileName = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'document.pdf';
       if (!fileName.endsWith('.pdf')) fileName = '$fileName.pdf';
       final file = File('${dir.path}/$fileName');
@@ -134,6 +133,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: const Text('HUMAID SOUL'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Search all documents',
+            onPressed: () => Navigator.pushNamed(context, '/search'),
+          ),
           IconButton(icon: const Icon(Icons.book), tooltip: 'Vocabulary Bank', onPressed: () => Navigator.pushNamed(context, '/vocab')),
           IconButton(icon: const Icon(Icons.link), tooltip: 'Import from URL', onPressed: _importing ? null : _importURL),
           IconButton(icon: const Icon(Icons.add), onPressed: _importing ? null : _importFile),
