@@ -5,7 +5,6 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
-  final int initialPage;
   final void Function(String word, Offset localPosition)? onWordTap;
   final void Function()? onNoText;
   final void Function()? onWordMapReady;
@@ -14,7 +13,6 @@ class CustomPdfViewer extends StatefulWidget {
   const CustomPdfViewer({
     super.key,
     required this.filePath,
-    this.initialPage = 1,
     this.onWordTap,
     this.onNoText,
     this.onWordMapReady,
@@ -32,9 +30,24 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
   double _pageWidth = 0;
   double _pageHeight = 0;
   Size _viewerSize = Size.zero;
+  bool _jumpPending = false;
+  int _pendingJumpPage = 1;
 
   List<List<WordEntry>> get wordMap => _wordMap;
   bool get isWordMapReady => _wordMapReady;
+
+  void jumpToPage(int page) {
+    if (_wordMap.isEmpty) {
+      // Not yet loaded – store for later
+      _pendingJumpPage = page;
+      _jumpPending = true;
+      return;
+    }
+    final target = page.clamp(1, _wordMap.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _controller.jumpToPage(target);
+    });
+  }
 
   @override
   void initState() {
@@ -71,6 +84,12 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
       doc.dispose();
       _wordMapReady = true;
       widget.onWordMapReady?.call();
+
+      // Execute a pending jump after the viewer is built
+      if (_jumpPending) {
+        _jumpPending = false;
+        jumpToPage(_pendingJumpPage);
+      }
     } catch (e) {
       debugPrint('Word map build failed: $e');
       _wordMapReady = true;
@@ -149,7 +168,6 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
           return SfPdfViewer.file(
             File(widget.filePath),
             controller: _controller,
-            initialPage: widget.initialPage,
             onTap: _onTap,
           );
         },

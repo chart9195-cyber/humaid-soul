@@ -8,21 +8,21 @@ class ReadingPosition {
     return File('${dir.path}/reading_positions.json');
   }
 
-  static Future<Map<String, double>> load() async {
+  static Future<Map<String, int>> load() async {
     final file = await _getFile();
     if (!await file.exists()) return {};
     final map = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-    return map.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    return map.map((k, v) => MapEntry(k, (v as num).toInt()));
   }
 
-  static Future<void> save(String filePath, double scrollFraction) async {
+  static Future<void> save(String filePath, int page) async {
     final map = await load();
-    map[filePath] = scrollFraction;
+    map[filePath] = page.clamp(1, 100000);
     final file = await _getFile();
     await file.writeAsString(jsonEncode(map));
   }
 
-  static Future<double?> get(String filePath) async {
+  static Future<int?> get(String filePath) async {
     final map = await load();
     return map[filePath];
   }

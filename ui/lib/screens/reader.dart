@@ -37,8 +37,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _ttsAvailable = false;
   bool _ttsActive = false;
 
-  int _initialPage = 1;
-
   final GlobalKey<CustomPdfViewerState> _viewerKey = GlobalKey<CustomPdfViewerState>();
 
   @override
@@ -52,10 +50,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _restorePosition() async {
-    final value = await ReadingPosition.get(widget.pdfPath);
-    if (value != null) {
-      final page = (value is int) ? value : value.toInt();
-      if (page > 0) setState(() => _initialPage = page);
+    final page = await ReadingPosition.get(widget.pdfPath);
+    if (page != null && page > 0) {
+      // Will be applied after viewer is ready
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _viewerKey.currentState?.jumpToPage(page);
+      });
     }
   }
 
@@ -238,7 +238,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
               CustomPdfViewer(
                 key: _viewerKey,
                 filePath: widget.pdfPath,
-                initialPage: _initialPage,
                 onWordTap: _onWordTap,
                 onNoText: _onNoText,
                 onWordMapReady: _onWordMapReady,
