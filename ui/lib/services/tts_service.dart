@@ -1,7 +1,7 @@
-import 'package:flutter_kokoro_tts/flutter_kokoro_tts.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 class TtsService {
-  final KokoroTts _tts = KokoroTts();
+  final FlutterTts _tts = FlutterTts();
   bool _initialized = false;
   bool _speaking = false;
   Function(String)? onError;
@@ -9,20 +9,26 @@ class TtsService {
   TtsService({this.onError});
 
   bool get isSpeaking => _speaking;
-  bool get isAvailable => true; // always available after init
+  bool get isAvailable => _initialized;
 
   Future<bool> init() async {
     if (_initialized) return true;
     try {
-      await _tts.initialize(
-        onProgress: (progress, status) {
-          // Optional: notify UI of model download progress
-          // print('Kokoro init: $status (${(progress * 100).round()}%)');
-        },
-      );
+      await _tts.setLanguage('en-US');
+      await _tts.setSpeechRate(0.5);
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+
+      _tts.setStartHandler(() => _speaking = true);
+      _tts.setCompletionHandler(() => _speaking = false);
+      _tts.setErrorHandler((msg) {
+        _speaking = false;
+        onError?.call(msg);
+      });
+
       _initialized = true;
     } catch (e) {
-      onError?.call('Kokoro init failed: $e');
+      onError?.call('TTS init failed: $e');
     }
     return _initialized;
   }
@@ -30,29 +36,16 @@ class TtsService {
   Future<void> speak(String text) async {
     if (!_initialized) return;
     if (_speaking) await stop();
-    _speaking = true;
-    try {
-      final audio = await _tts.generate(
-        text,
-        voice: 'Bella',
-        speed: 1.0,
-      );
-      // Kokoro returns Float32List; playback requires a separate audio plugin.
-      // For a self-contained solution, we'll use the device's built-in player
-      // via a simple WAV writer and the system player. For now, we'll stub this.
-      // Full integration will be completed in the next iteration.
-    } catch (e) {
-      onError?.call('Speech generation failed: $e');
-    }
-    _speaking = false;
+    await _tts.speak(text);
   }
 
   Future<void> stop() async {
+    if (!_initialized) return;
+    await _tts.stop();
     _speaking = false;
-    // Kokoro does not support stop mid-generation yet.
   }
 
   Future<void> dispose() async {
-    await _tts.dispose();
+    await stop();
   }
 }
