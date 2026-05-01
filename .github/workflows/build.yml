@@ -96,8 +96,8 @@ jobs:
             cp -r "$TEMP_DIR/temp_app/android" ui/
             rm -rf "$TEMP_DIR"
           fi
-          # Bump minSdkVersion and compileSdkVersion (flutter_tts requires API 36)
-          sed -i 's/minSdkVersion .*/minSdkVersion 21/' ui/android/app/build.gradle
+          # Bump minSdkVersion to 24 (Android 7.0) – required by flutter_kokoro_tts dependencies
+          sed -i 's/minSdkVersion .*/minSdkVersion 24/' ui/android/app/build.gradle
           sed -i 's/compileSdkVersion .*/compileSdkVersion 36/' ui/android/app/build.gradle
           # ProGuard rules
           mkdir -p ui/android/app/proguard
