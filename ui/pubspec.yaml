@@ -14,7 +14,7 @@ dependencies:
   file_picker: ^8.0.0
   syncfusion_flutter_pdfviewer: 24.2.9
   syncfusion_flutter_pdf: 24.2.9
-  flutter_kokoro_tts: ^0.0.1
+  flutter_tts: ^3.8.0
   http: ^1.2.0
 
 dev_dependencies:
