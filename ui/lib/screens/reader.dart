@@ -52,9 +52,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _restorePosition() async {
-    final page = await ReadingPosition.get(widget.pdfPath);
-    if (page != null && page > 0) {
-      setState(() => _initialPage = page);
+    final value = await ReadingPosition.get(widget.pdfPath);
+    if (value != null) {
+      final page = (value is int) ? value : value.toInt();
+      if (page > 0) setState(() => _initialPage = page);
     }
   }
 
