@@ -5,11 +5,20 @@ class TtsService {
   bool _initialized = false;
   bool _speaking = false;
   Function(String)? onError;
+  Function()? onComplete;
 
-  TtsService({this.onError});
+  TtsService({this.onError, this.onComplete});
 
   bool get isSpeaking => _speaking;
   bool get isAvailable => _initialized;
+
+  void setCompletionHandler(Function()? handler) {
+    onComplete = handler;
+    _tts.setCompletionHandler(() {
+      _speaking = false;
+      onComplete?.call();
+    });
+  }
 
   Future<bool> init() async {
     if (_initialized) return true;
@@ -20,7 +29,6 @@ class TtsService {
       await _tts.setPitch(1.0);
 
       _tts.setStartHandler(() => _speaking = true);
-      _tts.setCompletionHandler(() => _speaking = false);
       _tts.setErrorHandler((msg) {
         _speaking = false;
         onError?.call(msg);
