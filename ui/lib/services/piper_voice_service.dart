@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart';
@@ -34,7 +33,7 @@ class PiperVoiceService {
 
       final config = OfflineTtsConfig(
         model: OfflineTtsModelConfig(
-          model: modelPath,
+          vitsModel: modelPath,
           tokens: tokensPath,
           dataDir: dataDir.isNotEmpty ? dataDir : null,
           provider: 'cpu',
@@ -59,17 +58,9 @@ class PiperVoiceService {
       if (_playing) await stop();
       _playing = true;
 
-      // generate() returns WAV audio bytes
-      final Uint8List? audio = await _tts!.generate(text: text);
-      if (audio == null) {
-        _playing = false;
-        onError?.call('Voice synthesis returned no audio');
-        return;
-      }
-
-      final tempDir = await getTemporaryDirectory();
-      final outFile = File('${tempDir.path}/piper_speech.wav');
-      await outFile.writeAsBytes(audio);
+      final dir = await getTemporaryDirectory();
+      final outFile = File('${dir.path}/piper_speech.wav');
+      await _tts!.generate(text, outFile.path);
 
       await _player.setFilePath(outFile.path);
       _player.playerStateStream.listen((state) {
@@ -92,7 +83,6 @@ class PiperVoiceService {
 
   Future<void> dispose() async {
     await _player.dispose();
-    // OfflineTts has no explicit dispose; GC handles it.
-    _tts = null;
+    _tts?.dispose();
   }
 }
