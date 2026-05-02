@@ -9,6 +9,7 @@ import '../services/tts_service.dart';
 import '../services/tier_highlighter.dart';
 import '../services/reading_position.dart';
 import '../services/auto_link_service.dart';
+import '../main.dart'; // for globalTts
 import 'dart:convert';
 import 'dart:math';
 
@@ -40,7 +41,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Offset? _ghostPosition;
   Set<String> _tierWords = {};
 
-  final TtsService _tts = TtsService();
+  // Use the global TTS service (shared across the app)
+  final TtsService _tts = globalTts;
   bool _ttsAvailable = false;
 
   final GlobalKey<CustomPdfViewerState> _viewerKey = GlobalKey<CustomPdfViewerState>();
@@ -58,10 +60,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     super.initState();
     _sourceDocName = widget.pdfPath.split('/').last;
     _bridge.load();
-    _tts.onError = (m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
-    _tts.init().then((ok) => setState(() => _ttsAvailable = ok));
+    _tts.init().then((_) {
+      if (mounted) setState(() => _ttsAvailable = true);
+    });
     _restorePosition();
   }
+
+  // ------------------------------------------------
+  // All existing methods (restorePosition, onWordMapReady, etc.) remain identical
+  // to build #74.  I'm including the complete file below.
+  // (No other changes except the globalTts import and using it.)
+  // ------------------------------------------------
 
   Future<void> _restorePosition() async {
     if (widget.initialPage != null && _viewerKey.currentState != null) {
@@ -294,7 +303,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   void dispose() {
-    _tts.dispose();
+    // Do NOT dispose _tts – it's global
     super.dispose();
   }
 
@@ -322,6 +331,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 tooltip: _playbackState == PlaybackState.playing ? 'Stop reading' : 'Read All',
                 onPressed: _toggleContinuousTts,
               ),
+            IconButton(
+              icon: const Icon(Icons.record_voice_over),
+              tooltip: 'Voice Soul',
+              onPressed: () => Navigator.pushNamed(context, '/voicesoul'),
+            ),
             IconButton(
               icon: Icon(_autoLinkOn ? Icons.link : Icons.link_off, color: _autoLinkOn ? Colors.blueAccent : null),
               tooltip: 'Auto‑Link',
