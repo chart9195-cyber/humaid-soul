@@ -138,9 +138,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
             tooltip: 'Search all documents',
             onPressed: () => Navigator.pushNamed(context, '/search'),
           ),
-          IconButton(icon: const Icon(Icons.book), tooltip: 'Vocabulary Bank', onPressed: () => Navigator.pushNamed(context, '/vocab')),
-          IconButton(icon: const Icon(Icons.link), tooltip: 'Import from URL', onPressed: _importing ? null : _importURL),
-          IconButton(icon: const Icon(Icons.add), onPressed: _importing ? null : _importFile),
+          IconButton(
+            icon: const Icon(Icons.book),
+            tooltip: 'Vocabulary Bank',
+            onPressed: () => Navigator.pushNamed(context, '/vocab'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.dns),
+            tooltip: 'Soul-Packs',
+            onPressed: () => Navigator.pushNamed(context, '/soulpacks'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.link),
+            tooltip: 'Import from URL',
+            onPressed: _importing ? null : _importURL,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _importing ? null : _importFile,
+          ),
         ],
       ),
       body: _importing

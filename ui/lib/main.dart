@@ -4,6 +4,7 @@ import 'screens/test_lookup.dart';
 import 'screens/vocabulary.dart';
 import 'screens/search_screen.dart';
 import 'screens/doc_stats_screen.dart';
+import 'screens/soul_pack_screen.dart';
 
 void main() {
   runApp(const HumaidSoulApp());
@@ -27,9 +28,9 @@ class HumaidSoulApp extends StatelessWidget {
         '/test': (context) => const TestLookupScreen(),
         '/vocab': (context) => const VocabScreen(),
         '/search': (context) => const SearchScreen(),
+        '/soulpacks': (context) => const SoulPackScreen(),
       },
       onGenerateRoute: (settings) {
-        // Handle routes with arguments
         if (settings.name == '/docstats') {
           final args = settings.arguments as Map<String, dynamic>;
           final pdfPath = args['pdfPath'] as String;
