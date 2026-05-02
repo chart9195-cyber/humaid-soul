@@ -20,7 +20,6 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  // … existing state variables …
   String? _tappedWord;
   Map<String, dynamic>? _entry;
   Offset? _hudPosition;
@@ -30,16 +29,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _rulerOn = false;
   bool _focusModeOn = false;
   String _sourceDocName = '';
+
   String? _ghostWord;
   String? _ghostDefinition;
   Offset? _ghostPosition;
   Set<String> _tierWords = {};
+
   final TtsService _tts = TtsService();
   bool _ttsAvailable = false;
   bool _ttsActive = false;
+
   final GlobalKey<CustomPdfViewerState> _viewerKey = GlobalKey<CustomPdfViewerState>();
 
-  // Tier highlight state
   List<Rect> _tierRects = [];
 
   @override
@@ -50,6 +51,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _tts.onError = (m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
     _tts.init().then((ok) => setState(() => _ttsAvailable = ok));
     _restorePosition();
+  }
+
+  Future<void> _restorePosition() async {
+    if (widget.initialPage != null && _viewerKey.currentState != null) {
+      _viewerKey.currentState!.jumpToPage(widget.initialPage!);
+    }
   }
 
   void _onWordMapReady() async {
@@ -77,16 +84,135 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _updateTierRects();
   }
 
-  // … existing tap, long‑press, TTS, HUD methods unchanged …
-  // (keeping the full implementation from before)
-  void _onWordTap(String word, Offset localPosition) { … }
-  void _onLongPress(String word, Offset localPosition) { … }
-  void _onNoText() { … }
-  void _saveToVocab() { … }
-  void _toggleReadAloud() { … }
-  void _showError(String msg) { … }
-  Offset _bestHudPosition(Offset near) { … }
-  void _dismissHUD() { … }
+  Future<void> _savePosition() async {
+    final state = _viewerKey.currentState;
+    if (state != null) {
+      final fraction = state.getScrollFraction();
+      final totalPages = state.wordMap.length;
+      if (totalPages > 0) {
+        final page = (fraction * (totalPages - 1)).round() + 1;
+        await ReadingPosition.save(widget.pdfPath, page);
+      }
+    }
+  }
+
+  void _onWordTap(String word, Offset localPosition) {
+    final now = DateTime.now();
+    if (now.difference(_lastTapTime).inMilliseconds < 200) return;
+    _lastTapTime = now;
+
+    if (_bridge.state != EngineState.ready) { _showError('Engine not ready'); return; }
+
+    String jsonStr;
+    try { jsonStr = _bridge.lookup(word); } catch (e) { _showError('Lookup failed'); return; }
+    if (jsonStr == '[]') { _showError('No definition found'); return; }
+    try {
+      final parsed = jsonDecode(jsonStr);
+      if (parsed is Map<String, dynamic>) {
+        setState(() {
+          _tappedWord = word;
+          _entry = parsed;
+          _hudPosition = _bestHudPosition(localPosition);
+          _ghostWord = null;
+        });
+      }
+    } catch (e) { _showError('Parse error'); }
+  }
+
+  void _onLongPress(String word, Offset localPosition) {
+    if (_bridge.state != EngineState.ready) return;
+    String jsonStr;
+    try { jsonStr = _bridge.lookup(word); } catch (_) { return; }
+    if (jsonStr == '[]') return;
+    try {
+      final parsed = jsonDecode(jsonStr);
+      String? def;
+      if (parsed is Map<String, dynamic>) {
+        final defs = (parsed['definitions'] as List?)?.cast<String>() ?? [];
+        def = defs.isNotEmpty ? defs.first : null;
+      }
+      setState(() {
+        _ghostWord = word;
+        _ghostDefinition = def;
+        _ghostPosition = Offset(localPosition.dx, localPosition.dy - 30);
+        _tappedWord = null;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleReadAloud() async {
+    if (_ttsActive) {
+      await _tts.stop();
+      setState(() => _ttsActive = false);
+      return;
+    }
+    try {
+      final textService = PdfTextService(widget.pdfPath);
+      final texts = await textService.getPageTexts();
+      if (texts.isEmpty) return;
+      final pageText = texts.isNotEmpty ? texts[0] : '';
+      if (pageText.trim().isEmpty) return;
+      await _tts.speak(pageText);
+      if (mounted) setState(() => _ttsActive = true);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Read aloud failed: $e')));
+    }
+  }
+
+  void _onNoText() => _showError('No text layer (scanned PDF?)');
+
+  void _showError(String msg) {
+    setState(() {
+      _tappedWord = msg;
+      _entry = {'word_type': '', 'definitions': [], 'synonyms': []};
+      _hudPosition = const Offset(20, 100);
+      _ghostWord = null;
+    });
+  }
+
+  void _saveToVocab() async {
+    if (_entry == null || _tappedWord == null) return;
+    final defs = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final entry = VocabEntry(
+      word: _tappedWord!,
+      definition: defs.isNotEmpty ? defs.first : '',
+      wordType: _entry!['word_type'] ?? '',
+      synonyms: (_entry!['synonyms'] as List?)?.cast<String>() ?? [],
+      sourceDocument: _sourceDocName,
+      savedAt: DateTime.now(),
+    );
+    await VocabBank.add(entry);
+    final viewerState = _viewerKey.currentState;
+    if (viewerState != null && viewerState.isWordMapReady) {
+      final tier = await TierHighlighter.getTierWords(viewerState.wordMap);
+      if (mounted) setState(() => _tierWords = tier);
+    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('"${_tappedWord}" saved to Vocabulary Bank')),
+    );
+  }
+
+  Offset _bestHudPosition(Offset near) {
+    final w = MediaQuery.of(context).size.width;
+    final h = MediaQuery.of(context).size.height;
+    const cardW = 250.0, cardH = 160.0, pad = 12.0;
+    double left = near.dx - cardW / 2;
+    double top = near.dy - cardH - 40;
+    if (left < pad) left = pad;
+    if (left + cardW > w - pad) left = w - cardW - pad;
+    if (top < pad) top = near.dy + 40;
+    if (top + cardH > h - pad) top = h - cardH - pad;
+    return Offset(left, max(pad, top));
+  }
+
+  void _dismissHUD() {
+    setState(() {
+      _tappedWord = null;
+      _entry = null;
+      _hudPosition = null;
+      _ghostWord = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,7 +265,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 onLongPress: _onLongPress,
                 onPageChanged: _onPageChanged,
               ),
-              // Tier‑1 Highlight Overlay
               if (_tierRects.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -209,5 +334,72 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  Widget _buildHUD(bool isTier) { … /* existing HUD code */ }
+  Widget _buildHUD(bool isTier) {
+    final wordType = _entry!['word_type'] ?? '';
+    final definitions = (_entry!['definitions'] as List?)?.cast<String>() ?? [];
+    final synonyms = (_entry!['synonyms'] as List?)?.cast<String>() ?? [];
+
+    return GestureDetector(
+      onTap: () {},
+      child: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.grey[900]?.withOpacity(0.92),
+        child: Container(
+          width: 250,
+          padding: const EdgeInsets.all(16),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(_tappedWord!,
+                          style: const TextStyle(color: Colors.tealAccent, fontSize: 20, fontWeight: FontWeight.bold)),
+                    ),
+                    if (isTier)
+                      const Icon(Icons.star, color: Colors.amber, size: 18),
+                    if (wordType.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.teal[800], borderRadius: BorderRadius.circular(4)),
+                        child: Text(wordType, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.bookmark_add, color: Colors.tealAccent, size: 20),
+                      onPressed: _saveToVocab,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (definitions.isNotEmpty)
+                  ...definitions.take(3).map((d) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text('• $d', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                      )),
+                if (definitions.isEmpty)
+                  const Text('No definition found.', style: TextStyle(color: Colors.white70)),
+                const SizedBox(height: 8),
+                if (synonyms.isNotEmpty)
+                  Wrap(
+                    spacing: 6, runSpacing: 2,
+                    children: synonyms.take(6).map((s) => Chip(
+                          label: Text(s, style: const TextStyle(fontSize: 11)),
+                          backgroundColor: Colors.teal[700],
+                          labelStyle: const TextStyle(color: Colors.white),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        )).toList(),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

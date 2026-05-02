@@ -77,20 +77,83 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
-  // … existing hit‑test and tap methods unchanged …
-  String? _hitTestWord(int pageIdx, Offset pageCoord) { … }
-  _PdfHit? _widgetToPdf(Offset widgetPos) { … }
-  void _onTap(PdfGestureDetails details) { … }
-  void _onLongPress(LongPressStartDetails details) { … }
-  void jumpToPage(int page) { … }
-  double getScrollFraction() { … }
+  String? _hitTestWord(int pageIdx, Offset pageCoord) {
+    if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
+    for (final entry in _wordMap[pageIdx]) {
+      if (entry.bounds.contains(pageCoord)) {
+        final text = entry.text.trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return null;
+  }
 
-  /// Returns widget‑space rectangles for tier words on the *currently visible page*.
+  _PdfHit? _widgetToPdf(Offset widgetPos) {
+    if (_pageWidth == 0 || _pageHeight == 0 || _viewerSize.isEmpty) return null;
+    final viewerWidth = _viewerSize.width;
+    final scale = viewerWidth / _pageWidth;
+    final pageNumber = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    final scrollOffset = _controller.scrollOffset;
+    final totalScrollY = (pageNumber - 1) * _pageHeight + scrollOffset.dy;
+    final pdfX = widgetPos.dx / scale;
+    final pdfY = totalScrollY + widgetPos.dy / scale;
+    final pageIdx = (pdfY / _pageHeight).floor();
+    if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
+    final pageY = pdfY - pageIdx * _pageHeight;
+    return _PdfHit(pageIdx, Offset(pdfX, pageY));
+  }
+
+  void _onTap(PdfGestureDetails details) {
+    if (!_wordMapReady) return;
+    final pageNumber = details.pageNumber;
+    if (pageNumber == null || pageNumber < 1) return;
+    final pageIdx = pageNumber - 1;
+    final pageOffset = details.pagePosition;
+    if (pageOffset == null) return;
+    final word = _hitTestWord(pageIdx, pageOffset);
+    if (word != null) {
+      widget.onWordTap?.call(word, details.position);
+    } else {
+      widget.onNoText?.call();
+    }
+  }
+
+  void _onLongPress(LongPressStartDetails details) {
+    if (!_wordMapReady || widget.onLongPress == null) return;
+    final hit = _widgetToPdf(details.localPosition);
+    if (hit == null) return;
+    final word = _hitTestWord(hit.pageIndex, hit.pageCoord);
+    if (word != null) {
+      widget.onLongPress!(word, details.localPosition);
+    }
+  }
+
+  void jumpToPage(int page) {
+    if (_wordMap.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_wordMap.isNotEmpty) {
+          _controller.jumpToPage(page.clamp(1, _wordMap.length));
+        }
+      });
+      return;
+    }
+    final target = page.clamp(1, _wordMap.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _controller.jumpToPage(target);
+    });
+  }
+
+  double getScrollFraction() {
+    final totalPages = _wordMap.length;
+    if (totalPages <= 1) return 0;
+    final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    return ((curPage - 1) / (totalPages - 1)).clamp(0.0, 1.0);
+  }
+
   List<Rect> getTierRects(Set<String> tierWords) {
     if (_viewerSize.isEmpty || _pageWidth == 0 || _pageHeight == 0 || !_wordMapReady) {
       return [];
     }
-
     final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
     final pageIdx = curPage - 1;
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return [];
@@ -99,8 +162,6 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     final scale = viewerWidth / _pageWidth;
     final scrollY = _controller.scrollOffset.dy;
 
-    // Compute the widget Y coordinate of a PDF point (bottom‑left origin)
-    // widgetY = (pageIdx * _pageHeight - pdfY) * scale + scrollY
     final rects = <Rect>[];
     for (final entry in _wordMap[pageIdx]) {
       if (tierWords.contains(entry.text.toLowerCase())) {
