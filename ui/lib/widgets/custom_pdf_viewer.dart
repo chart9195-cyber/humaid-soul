@@ -10,6 +10,8 @@ class CustomPdfViewer extends StatefulWidget {
   final void Function()? onWordMapReady;
   final void Function(String word, Offset localPosition)? onLongPress;
   final VoidCallback? onPageChanged;
+  final void Function(int targetPage)? onAutoLinkTap;
+  final Map<String, int>? linkTargets;
 
   const CustomPdfViewer({
     super.key,
@@ -19,6 +21,8 @@ class CustomPdfViewer extends StatefulWidget {
     this.onWordMapReady,
     this.onLongPress,
     this.onPageChanged,
+    this.onAutoLinkTap,
+    this.linkTargets,
   });
 
   @override
@@ -35,6 +39,7 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
 
   List<List<WordEntry>> get wordMap => _wordMap;
   bool get isWordMapReady => _wordMapReady;
+  PdfViewerController get controller => _controller;
 
   @override
   void initState() {
@@ -112,7 +117,13 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     if (pageOffset == null) return;
     final word = _hitTestWord(pageIdx, pageOffset);
     if (word != null) {
-      widget.onWordTap?.call(word, details.position);
+      // Check auto‑link targets first
+      final targetPage = widget.linkTargets?[word];
+      if (targetPage != null && widget.onAutoLinkTap != null) {
+        widget.onAutoLinkTap!(targetPage);
+      } else {
+        widget.onWordTap?.call(word, details.position);
+      }
     } else {
       widget.onNoText?.call();
     }
@@ -150,7 +161,10 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     return ((curPage - 1) / (totalPages - 1)).clamp(0.0, 1.0);
   }
 
-  List<Rect> getTierRects(Set<String> tierWords) {
+  List<Rect> getTierRects(Set<String> tierWords) => _getRectsForWords(tierWords);
+  List<Rect> getLinkRects(Set<String> linkWords) => _getRectsForWords(linkWords);
+
+  List<Rect> _getRectsForWords(Set<String> words) {
     if (_viewerSize.isEmpty || _pageWidth == 0 || _pageHeight == 0 || !_wordMapReady) {
       return [];
     }
@@ -164,7 +178,7 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
 
     final rects = <Rect>[];
     for (final entry in _wordMap[pageIdx]) {
-      if (tierWords.contains(entry.text.toLowerCase())) {
+      if (words.contains(entry.text)) {
         final left = entry.bounds.left * scale;
         final top = (pageIdx * _pageHeight - entry.bounds.top) * scale + scrollY;
         final width = entry.bounds.width * scale;
