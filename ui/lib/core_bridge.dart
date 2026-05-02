@@ -4,8 +4,13 @@ import 'asset_loader.dart';
 
 typedef InitEngineNative = Int8 Function(Pointer<Utf8>);
 typedef InitEngineDart = int Function(Pointer<Utf8>);
+
+typedef LoadDomainNative = Int8 Function(Pointer<Utf8>);
+typedef LoadDomainDart = int Function(Pointer<Utf8>);
+
 typedef LookupWordNative = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef LookupWordDart = Pointer<Utf8> Function(Pointer<Utf8>);
+
 typedef LemmatizeNative = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef LemmatizeDart = Pointer<Utf8> Function(Pointer<Utf8>);
 
@@ -16,6 +21,7 @@ class CoreBridge {
   late InitEngineDart _initEngine;
   late LookupWordDart _lookupWord;
   late LemmatizeDart _lemmatize;
+  late LoadDomainDart _loadDomain;
 
   EngineState state = EngineState.uninitialized;
   String? errorMessage;
@@ -25,28 +31,8 @@ class CoreBridge {
 
   bool get isLoaded => state == EngineState.ready;
 
-  /// Call this to ensure the engine is ready. Safe to call multiple times.
-  Future<void> loadIfNeeded() async {
-    if (state == EngineState.ready) return;
-    if (state == EngineState.loading) {
-      // Wait for the current load to finish (simple polling, no event loop needed)
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (state == EngineState.ready || state == EngineState.error) return;
-      }
-    }
-    if (state == EngineState.error) {
-      // Allow retry
-      state = EngineState.uninitialized;
-      errorMessage = null;
-    }
-    await load();
-  }
-
-  /// Internal load – can be called externally only if state is uninitialized.
   Future<void> load() async {
     if (state == EngineState.ready || state == EngineState.loading) return;
-
     state = EngineState.loading;
     errorMessage = null;
     try {
@@ -54,6 +40,7 @@ class CoreBridge {
       _initEngine = _lib.lookupFunction<InitEngineNative, InitEngineDart>('init_engine');
       _lookupWord = _lib.lookupFunction<LookupWordNative, LookupWordDart>('lookup_word');
       _lemmatize = _lib.lookupFunction<LemmatizeNative, LemmatizeDart>('lemmatize');
+      _loadDomain = _lib.lookupFunction<LoadDomainNative, LoadDomainDart>('load_domain_dictionary');
 
       final dictPath = await AssetLoader.copyDictionaryToLocal();
       if (dictPath == null) {
@@ -69,13 +56,23 @@ class CoreBridge {
       if (result == 1) {
         state = EngineState.ready;
       } else {
-        errorMessage = 'Engine initialization returned failure.';
+        errorMessage = 'Engine init returned failure.';
         state = EngineState.error;
       }
     } catch (e) {
       errorMessage = 'Engine load exception: $e';
       state = EngineState.error;
     }
+  }
+
+  /// Load a domain dictionary (e.g., Medical.db.zst) or unload if path is empty.
+  bool loadDomainDictionary(String? path) {
+    if (state != EngineState.ready) return false;
+    final p = path ?? '';
+    final pathPtr = p.toNativeUtf8();
+    final result = _loadDomain(pathPtr);
+    calloc.free(pathPtr);
+    return result == 1;
   }
 
   String lookup(String word) {

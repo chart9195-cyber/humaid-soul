@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../services/soul_pack.dart';
 import '../services/content_manager.dart';
+import '../core_bridge.dart';
 
 class SoulPackScreen extends StatefulWidget {
   const SoulPackScreen({super.key});
@@ -45,7 +46,7 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
 
   Future<void> _togglePack(SoulPack pack) async {
     if (!pack.active) {
-      // Enable the pack: download if missing
+      // Enable the pack: download if missing, then load into engine
       final downloaded = await _isPackDownloaded(pack);
       if (!downloaded) {
         final shouldDownload = await showDialog<bool>(
@@ -64,6 +65,22 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
         final success = await _downloadPack(pack);
         if (!success) return;
       }
+      // Load the pack into the engine
+      final packPath = '${await _docDir()}/${pack.fileName}';
+      final bridge = CoreBridge();
+      final ok = bridge.loadDomainDictionary(packPath);
+      if (!ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to load domain dictionary')),
+          );
+        }
+        return;
+      }
+    } else {
+      // Deactivate: unload domain dictionary from engine
+      final bridge = CoreBridge();
+      bridge.loadDomainDictionary(null);
     }
 
     await SoulPackManager.setActive(pack.domain, !pack.active);

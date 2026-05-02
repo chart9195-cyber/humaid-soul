@@ -6,55 +6,71 @@ use std::path::Path;
 use std::sync::Mutex;
 
 static DICTIONARY: OnceCell<Mutex<Connection>> = OnceCell::new();
+static DOMAIN_DICTIONARY: OnceCell<Mutex<Option<Connection>>> = OnceCell::new();
 
-/// Load dictionary from compressed file. Creates a sibling `.db` file for actual access.
+/// Load primary (WordNet) dictionary from compressed .zst file.
 pub fn load_dictionary(path_zst: &str) -> bool {
-    // Read compressed file
-    let mut file = match std::fs::File::open(path_zst) {
-        Ok(f) => f,
-        Err(e) => {
-            log::error!("Failed to open dictionary file: {}", e);
-            return false;
+    let conn = decompress_and_open(path_zst);
+    match conn {
+        Some(c) => {
+            c.execute_batch("PRAGMA journal_mode=WAL;").ok();
+            DICTIONARY.set(Mutex::new(c)).is_ok()
         }
-    };
+        None => false,
+    }
+}
+
+/// Load a secondary domain dictionary (Medical, Legal, etc.).
+/// Call with an empty string or invalid path to unload.
+pub fn load_domain_dictionary(path_zst: &str) -> bool {
+    if path_zst.is_empty() {
+        // Unload domain dictionary
+        if let Some(mutex) = DOMAIN_DICTIONARY.get() {
+            if let Ok(mut opt) = mutex.lock() {
+                *opt = None;
+            }
+        }
+        return true;
+    }
+
+    let conn = decompress_and_open(path_zst);
+    match conn {
+        Some(c) => {
+            c.execute_batch("PRAGMA journal_mode=WAL;").ok();
+            if DOMAIN_DICTIONARY.get().is_none() {
+                DOMAIN_DICTIONARY.set(Mutex::new(Some(c))).is_ok()
+            } else {
+                if let Some(mutex) = DOMAIN_DICTIONARY.get() {
+                    if let Ok(mut opt) = mutex.lock() {
+                        *opt = Some(c);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+        None => false,
+    }
+}
+
+fn decompress_and_open(path_zst: &str) -> Option<Connection> {
+    let mut file = std::fs::File::open(path_zst).ok()?;
     let mut compressed = Vec::new();
-    if file.read_to_end(&mut compressed).is_err() {
-        return false;
-    }
-
-    // Decompress
-    let mut decoder = match zstd::stream::Decoder::new(&compressed[..]) {
-        Ok(d) => d,
-        Err(e) => {
-            log::error!("Failed to create Zstd decoder: {}", e);
-            return false;
-        }
-    };
+    file.read_to_end(&mut compressed).ok()?;
+    let mut decoder = zstd::stream::Decoder::new(&compressed[..]).ok()?;
     let mut decompressed = Vec::new();
-    if decoder.read_to_end(&mut decompressed).is_err() {
-        return false;
-    }
+    decoder.read_to_end(&mut decompressed).ok()?;
 
-    // Derive a writable path in the same directory as the zst file
     let zst_path = Path::new(path_zst);
     let dir = zst_path.parent().unwrap_or_else(|| Path::new("."));
-    let db_path = dir.join("soul_dict_temp.db");
+    let db_path = dir.join(format!("{}_temp.db", zst_path.file_stem()?.to_str()?));
 
-    if std::fs::write(&db_path, &decompressed).is_err() {
-        log::error!("Failed to write temporary dictionary to {:?}", db_path);
-        return false;
-    }
-
-    let conn = match Connection::open(&db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("Failed to open temporary dictionary DB: {}", e);
-            return false;
-        }
-    };
-    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
-
-    DICTIONARY.set(Mutex::new(conn)).is_ok()
+    std::fs::write(&db_path, &decompressed).ok()?;
+    let conn = Connection::open(&db_path).ok()?;
+    Some(conn)
 }
 
 #[derive(Serialize)]
@@ -66,11 +82,32 @@ struct WordEntry {
 }
 
 pub fn lookup(word: &str) -> String {
+    // Check domain dictionary first
+    let domain_result = if let Some(mutex) = DOMAIN_DICTIONARY.get() {
+        if let Ok(opt) = mutex.lock() {
+            if let Some(conn) = opt.as_ref() {
+                direct_lookup(conn, word)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some(entry) = domain_result {
+        return serde_json::to_string(&entry).unwrap_or_default();
+    }
+
+    // Fall back to main dictionary
     let guard = match DICTIONARY.get() {
         Some(m) => m.lock().unwrap(),
         None => return "[]".to_string(),
     };
     let conn = &*guard;
+
     if let Some(entry) = direct_lookup(conn, word) {
         return serde_json::to_string(&entry).unwrap_or_default();
     }
@@ -134,14 +171,25 @@ fn direct_lookup(conn: &Connection, word: &str) -> Option<WordEntry> {
         word_name = row.0;
         word_type = row.1.unwrap_or_default();
         if let Some(def) = row.2 {
-            if !definitions.contains(&def) { definitions.push(def); }
+            if !definitions.contains(&def) {
+                definitions.push(def);
+            }
         }
         if let Some(syn) = row.3 {
-            if syn != word_name && !synonyms.contains(&syn) { synonyms.push(syn); }
+            if syn != word_name && !synonyms.contains(&syn) {
+                synonyms.push(syn);
+            }
         }
     }
-    if word_name.is_empty() { return None; }
-    Some(WordEntry { word: word_name, word_type, definitions, synonyms })
+    if word_name.is_empty() {
+        return None;
+    }
+    Some(WordEntry {
+        word: word_name,
+        word_type,
+        definitions,
+        synonyms,
+    })
 }
 
 fn lemmatize_impl(conn: &Connection, word: &str) -> String {
@@ -156,31 +204,48 @@ fn lemmatize_impl(conn: &Connection, word: &str) -> String {
     let stemmed = english_regular_stem(&lower);
     if stemmed != lower {
         let exists: bool = conn
-            .query_row("SELECT COUNT(*) FROM words WHERE word = ?1", params![stemmed], |row| row.get::<_, i64>(0))
+            .query_row(
+                "SELECT COUNT(*) FROM words WHERE word = ?1",
+                params![stemmed],
+                |row| row.get::<_, i64>(0),
+            )
             .map(|c| c > 0)
             .unwrap_or(false);
-        if exists { return stemmed; }
+        if exists {
+            return stemmed;
+        }
     }
     word.to_string()
 }
 
 fn english_regular_stem(word: &str) -> String {
     let suffixes = [
-        ("nesses", ""), ("ingly", ""), ("ations", "ate"), ("tions", "t"),
-        ("sses", "ss"), ("ships", "ship"), ("ments", "ment"),
-        ("ness", ""), ("ing", ""), ("ed", ""), ("s", ""),
-        ("ied", "y"), ("ves", "f"),
+        ("nesses", ""),
+        ("ingly", ""),
+        ("ations", "ate"),
+        ("tions", "t"),
+        ("sses", "ss"),
+        ("ships", "ship"),
+        ("ments", "ment"),
+        ("ness", ""),
+        ("ing", ""),
+        ("ed", ""),
+        ("s", ""),
+        ("ied", "y"),
+        ("ves", "f"),
     ];
     for (suffix, replacement) in suffixes.iter() {
         if word.ends_with(suffix) && word.len() > suffix.len() + 1 {
-            return format!("{}{}", &word[..word.len()-suffix.len()], replacement);
+            return format!("{}{}", &word[..word.len() - suffix.len()], replacement);
         }
     }
     word.to_string()
 }
 
 fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> {
-    let first_char = word.chars().next()
+    let first_char = word
+        .chars()
+        .next()
         .map(|c| format!("{}%", c))
         .unwrap_or_else(|| "%".to_string());
     let mut stmt = conn
@@ -194,7 +259,10 @@ fn fuzzy_impl(conn: &Connection, word: &str, max_results: usize) -> Vec<String> 
     let mut scored: Vec<(f64, String)> = candidates
         .into_iter()
         .map(|candidate| {
-            let dist = strsim::normalized_levenshtein(&word.to_lowercase(), &candidate.to_lowercase());
+            let dist = strsim::normalized_levenshtein(
+                &word.to_lowercase(),
+                &candidate.to_lowercase(),
+            );
             (dist, candidate)
         })
         .collect();
