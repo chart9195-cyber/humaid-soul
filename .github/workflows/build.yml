@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Dictionary ----------
+      # ---------- Dictionary (General) ----------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -34,6 +34,16 @@ jobs:
         run: zstd -19 soul_dict.db -o soul_dict.db.zst
       - name: Copy dictionary to Flutter assets
         run: mkdir -p ui/assets && cp soul_dict.db.zst ui/assets/
+
+      # ---------- Soul‑Packs ----------
+      - name: Build Medical Soul‑Pack
+        run: |
+          python scripts/build_medical_dict.py
+          zstd -19 medical.db -o medical.db.zst
+      - name: Build Legal Soul‑Pack
+        run: |
+          python scripts/build_legal_dict.py
+          zstd -19 legal.db -o legal.db.zst
 
       # ---------- Rust cross-compilation ----------
       - name: Cache Rust target
@@ -86,7 +96,6 @@ jobs:
         with:
           flutter-version: '3.22.0'
           channel: stable
-
       - name: Generate Android project
         run: |
           rm -rf ui/android
@@ -100,15 +109,11 @@ jobs:
           cp -r "$TEMP_DIR/temp_app/gradle" ui/android/ 2>/dev/null || true
           rm -rf "$TEMP_DIR"
           chmod +x ui/android/gradlew
-
       - name: Configure Android project
         run: |
-          # ProGuard rules for Syncfusion
           mkdir -p ui/android/app/proguard
           echo "-keep class com.syncfusion.** { *; }" > ui/android/app/proguard/proguard-rules.pro
           echo "-dontwarn com.syncfusion.**" >> ui/android/app/proguard/proguard-rules.pro
-
-          # Add PDF intent filter
           MAIN_MANIFEST="ui/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MAIN_MANIFEST" ]; then
             sed -i '/<\/activity>/i \
@@ -121,7 +126,6 @@ jobs:
                 <data android:mimeType="application/pdf"/> \
             </intent-filter>' "$MAIN_MANIFEST"
           fi
-
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
@@ -142,6 +146,18 @@ jobs:
         with:
           name: soul-dictionary
           path: soul_dict.db.zst
+      - name: Upload Medical Soul‑Pack
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: medical-soul-pack
+          path: medical.db.zst
+      - name: Upload Legal Soul‑Pack
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legal-soul-pack
+          path: legal.db.zst
 
       - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v') && success()
@@ -150,6 +166,8 @@ jobs:
           files: |
             ui/build/app/outputs/flutter-apk/app-debug.apk
             soul_dict.db.zst
+            medical.db.zst
+            legal.db.zst
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
