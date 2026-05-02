@@ -5,7 +5,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart';
 import 'voice_pack_manager.dart';
 
 class PiperVoiceService {
-  SherpaOnnxTts? _tts;
+  OfflineTts? _tts;
   final AudioPlayer _player = AudioPlayer();
   bool _loaded = false;
   bool _playing = false;
@@ -22,19 +22,17 @@ class PiperVoiceService {
     try {
       final dir = await getApplicationDocumentsDirectory();
 
-      // Paths to model files
       final modelPath = '${dir.path}/${model.fileName}';
       final tokensPath = '${dir.path}/${model.tokensName}';
       final dataDir = model.dataName.isNotEmpty ? '${dir.path}/${model.dataName}' : '';
 
-      // Ensure files exist
       if (!File(modelPath).existsSync() || !File(tokensPath).existsSync()) {
         onError?.call('Model files missing. Please download first.');
         return false;
       }
 
-      final config = SherpaOnnxOfflineTtsConfig(
-        model: SherpaOnnxOfflineTtsModelConfig(
+      final config = OfflineTtsConfig(
+        model: OfflineTtsModelConfig(
           vitsModel: modelPath,
           tokens: tokensPath,
           dataDir: dataDir.isNotEmpty ? dataDir : null,
@@ -43,7 +41,7 @@ class PiperVoiceService {
         ),
       );
 
-      _tts = SherpaOnnxTts(config);
+      _tts = OfflineTts(config);
       _loaded = true;
       _currentModelId = model.id;
       await VoicePackManager.setActive(model.id, true);
