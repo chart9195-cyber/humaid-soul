@@ -16,6 +16,11 @@ dependencies:
   syncfusion_flutter_pdf: 24.2.9
   flutter_tts: ^3.8.0
   http: ^1.2.0
+  just_audio: ^0.9.40
+  piper_tts_plugin:
+    git:
+      url: https://github.com/dev-6768/piper_tts_plugin.git
+      ref: dev-6768-v0.0.2
 
 dev_dependencies:
   flutter_test:
