@@ -25,21 +25,23 @@ class PiperVoiceService {
 
       final modelPath = '${dir.path}/${model.fileName}';
       final tokensPath = '${dir.path}/${model.tokensName}';
-      final dataDir =
-          model.dataName.isNotEmpty ? '${dir.path}/${model.dataName}' : '';
+
+      // dataDir must be a non‑null String; use empty string if missing
+      final dataDir = (model.dataName != null && model.dataName!.isNotEmpty)
+          ? '${dir.path}/${model.dataName}'
+          : '';
 
       if (!File(modelPath).existsSync() || !File(tokensPath).existsSync()) {
         onError?.call('Model files missing. Please download first.');
         return false;
       }
 
-      // Correctly nested API: OfflineTtsConfig ➜ OfflineTtsModelConfig ➜ OfflineTtsVitsModelConfig
       final config = OfflineTtsConfig(
         model: OfflineTtsModelConfig(
           vits: OfflineTtsVitsModelConfig(
             model: modelPath,
             tokens: tokensPath,
-            dataDir: dataDir.isNotEmpty ? dataDir : null,
+            dataDir: dataDir,
           ),
           numThreads: 2,
           provider: 'cpu',
@@ -142,7 +144,6 @@ class PiperVoiceService {
 
   Future<void> dispose() async {
     await _player.dispose();
-    // OfflineTts uses free(), not dispose()
     _tts?.free();
     _tts = null;
   }
