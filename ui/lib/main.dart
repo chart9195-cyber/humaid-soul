@@ -5,6 +5,10 @@ import 'screens/vocabulary.dart';
 import 'screens/search_screen.dart';
 import 'screens/doc_stats_screen.dart';
 import 'screens/soul_pack_screen.dart';
+import 'screens/voice_soul_screen.dart';
+import 'services/tts_service.dart';
+
+final TtsService globalTts = TtsService();
 
 void main() {
   runApp(const HumaidSoulApp());
@@ -29,13 +33,13 @@ class HumaidSoulApp extends StatelessWidget {
         '/vocab': (context) => const VocabScreen(),
         '/search': (context) => const SearchScreen(),
         '/soulpacks': (context) => const SoulPackScreen(),
+        '/voicesoul': (context) => VoiceSoulScreen(tts: globalTts),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/docstats') {
           final args = settings.arguments as Map<String, dynamic>;
-          final pdfPath = args['pdfPath'] as String;
           return MaterialPageRoute(
-            builder: (_) => DocStatsScreen(pdfPath: pdfPath),
+            builder: (_) => DocStatsScreen(pdfPath: args['pdfPath'] as String),
           );
         }
         return null;
