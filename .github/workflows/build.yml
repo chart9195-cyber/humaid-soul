@@ -60,6 +60,22 @@ jobs:
       - name: Generate app icon
         run: python scripts/generate_icon.py ui/assets/icon
 
+      # ---------- BSDiff delta patches ----------
+      - name: Install bsdiff
+        run: sudo apt-get update && sudo apt-get install -y bsdiff
+
+      - name: Generate delta patches
+        run: |
+          mkdir -p deltas
+          for file in medical.db.zst legal.db.zst soul_dict.db.zst; do
+            old_file=$(curl -sL "https://github.com/chart9195-cyber/humaid-soul/releases/latest/download/$file" -o /dev/null -w "%{http_code}")
+            if [ "$old_file" = "200" ]; then
+              curl -sL "https://github.com/chart9195-cyber/humaid-soul/releases/latest/download/$file" -o "old_$file"
+              bsdiff "old_$file" "$file" "deltas/$file.bsdiff"
+              rm "old_$file"
+            fi
+          done
+
       # ---------- Rust cross-compilation ----------
       - name: Cache Rust target
         uses: actions/cache@v4
@@ -247,6 +263,14 @@ jobs:
           name: norman-voice
           path: piper_models/norman.zip
 
+      # Upload BSDiff patches
+      - name: Upload delta patches
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-patches
+          path: deltas/
+
       - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v') && success()
         uses: softprops/action-gh-release@v1
@@ -261,6 +285,7 @@ jobs:
             piper_models/john.zip
             piper_models/kristin.zip
             piper_models/norman.zip
+            deltas/*.bsdiff
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
