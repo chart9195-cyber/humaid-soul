@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'screens/library.dart';
-import 'screens/test_lookup.dart';
 import 'screens/vocabulary.dart';
 import 'screens/search_screen.dart';
 import 'screens/doc_stats_screen.dart';
@@ -31,7 +30,6 @@ class HumaidSoulApp extends StatelessWidget {
         initialRoute: '/',
         routes: {
           '/': (context) => const LibraryScreen(),
-          '/test': (context) => const TestLookupScreen(),
           '/vocab': (context) => const VocabScreen(),
           '/search': (context) => const SearchScreen(),
           '/soulpacks': (context) => const SoulPackScreen(),

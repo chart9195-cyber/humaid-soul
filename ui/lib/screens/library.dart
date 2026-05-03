@@ -5,9 +5,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../services/vocab_bank.dart';
-import '../services/thumbnail_service.dart';
 import '../services/recent_documents.dart';
+import '../widgets/welcome_dialog.dart';
+import '../core_bridge.dart';
 import 'reader.dart';
+import 'about_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -21,11 +23,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<String> _recent = [];
   Map<String, int> _wordCounts = {};
   bool _importing = false;
+  bool _showWelcome = false;
 
   @override
   void initState() {
     super.initState();
     _loadLibrary();
+    _prewarmEngine();
+    _checkFirstRun();
+  }
+
+  Future<void> _checkFirstRun() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final flagFile = File('${dir.path}/.welcome_shown');
+    if (!await flagFile.exists()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => WelcomeDialog(
+              onDismiss: () async {
+                await flagFile.writeAsString('true');
+              },
+            ),
+          );
+        }
+      });
+    }
+  }
+
+  Future<void> _prewarmEngine() async {
+    // Load the dictionary engine in the background so first lookup is instant.
+    final bridge = CoreBridge();
+    if (bridge.state == EngineState.uninitialized) {
+      bridge.load();
+    }
   }
 
   Future<void> _loadLibrary() async {
@@ -76,8 +108,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         setState(() => _documents.add(path));
         await _saveLibrary();
         await _updateWordCounts();
-        // Generate thumbnail in background
-        ThumbnailService.getThumbnail(path);
       }
     }
   }
@@ -114,7 +144,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         setState(() => _documents.add(file.path));
         await _saveLibrary();
         await _updateWordCounts();
-        ThumbnailService.getThumbnail(file.path);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
@@ -128,7 +157,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _removeDeadEntries();
       return;
     }
-    // Track in recent
     await RecentDocuments.add(path);
     _recent = await RecentDocuments.load();
     setState(() {});
@@ -144,7 +172,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HUMAID SOUL'),
+        title: GestureDetector(
+          onLongPress: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen())),
+          child: const Text('HUMAID SOUL'),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
@@ -160,10 +191,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
       body: _importing
           ? const Center(child: CircularProgressIndicator())
           : _documents.isEmpty
-              ? const Center(child: Text('Your Library\nTap + to import a PDF.', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.grey)))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.library_books, size: 64, color: Colors.white.withOpacity(0.3)),
+                      const SizedBox(height: 16),
+                      const Text('Your Library is empty.',
+                          style: TextStyle(fontSize: 18, color: Colors.white54)),
+                      const SizedBox(height: 8),
+                      const Text('Tap + to import a PDF.',
+                          style: TextStyle(fontSize: 14, color: Colors.white38)),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: _importFile,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Import PDF'),
+                      ),
+                    ],
+                  ),
+                )
               : ListView(
                   children: [
-                    // Recent section
                     if (_recent.isNotEmpty) ...[
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -175,15 +224,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         child: Divider(color: Colors.white12),
                       ),
                     ],
-                    // Full library
                     ..._documents.map((path) => _buildListTile(path)),
                   ],
                 ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.pushNamed(context, '/test'),
-        label: const Text('Test Engine'),
-        icon: const Icon(Icons.search),
-      ),
+      floatingActionButton: null, // Remove the Test Engine FAB
     );
   }
 
@@ -191,19 +235,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final name = path.split('/').last;
     final wordCount = _wordCounts[path] ?? 0;
     return ListTile(
-      leading: FutureBuilder<String?>(
-        future: ThumbnailService.getThumbnail(path),
-        builder: (context, snapshot) {
-          final thumbPath = snapshot.data;
-          if (thumbPath != null && File(thumbPath).existsSync()) {
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Image.file(File(thumbPath), width: 40, height: 52, fit: BoxFit.cover),
-            );
-          }
-          return const Icon(Icons.picture_as_pdf);
-        },
-      ),
+      leading: const Icon(Icons.picture_as_pdf),
       title: Text(name),
       subtitle: wordCount > 0 ? Text('$wordCount saved words') : null,
       onTap: () => _openDocument(path),
