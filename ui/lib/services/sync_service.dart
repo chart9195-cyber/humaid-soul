@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'vocab_bank.dart';
 
 class SyncService {
@@ -33,12 +35,13 @@ class SyncService {
     }
   }
 
+  // ── Clipboard (fallback) ──
   static Future<void> shareToClipboard(BuildContext context) async {
     final data = await exportToString();
     await Clipboard.setData(ClipboardData(text: data));
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vocabulary copied to clipboard. Paste on the other device.')),
+        const SnackBar(content: Text('Vocabulary copied to clipboard.')),
       );
     }
   }
@@ -65,5 +68,38 @@ class SyncService {
         );
       }
     }
+  }
+
+  // ── QR Code ──
+  static Widget buildQrCode(BuildContext context) {
+    return FutureBuilder<String>(
+      future: exportToString(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return QrImageView(
+          data: snapshot.data!,
+          version: 10,
+          size: 250,
+          backgroundColor: Colors.white,
+        );
+      },
+    );
+  }
+
+  // ── QR Scanner ──
+  static Widget buildScanner({required void Function(String data) onDetected}) {
+    return MobileScanner(
+      onDetect: (capture) {
+        final barcodes = capture.barcodes;
+        if (barcodes.isNotEmpty) {
+          final code = barcodes.first.rawValue;
+          if (code != null) {
+            onDetected(code);
+          }
+        }
+      },
+    );
   }
 }
