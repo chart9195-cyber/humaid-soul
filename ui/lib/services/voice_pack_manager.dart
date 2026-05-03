@@ -10,6 +10,7 @@ class VoiceModel {
   final String tokensName;
   final String dataName;
   final String downloadUrl;
+  final String fallbackUrl;
   final int approxSizeMB;
   bool downloaded;
   bool active;
@@ -22,6 +23,7 @@ class VoiceModel {
     required this.tokensName,
     this.dataName = '',
     required this.downloadUrl,
+    required this.fallbackUrl,
     required this.approxSizeMB,
     this.downloaded = false,
     this.active = false,
@@ -35,6 +37,7 @@ class VoiceModel {
         'tokensName': tokensName,
         'dataName': dataName,
         'downloadUrl': downloadUrl,
+        'fallbackUrl': fallbackUrl,
         'approxSizeMB': approxSizeMB,
         'downloaded': downloaded,
         'active': active,
@@ -48,6 +51,7 @@ class VoiceModel {
         tokensName: json['tokensName'] ?? 'tokens.txt',
         dataName: json['dataName'] ?? '',
         downloadUrl: json['downloadUrl'] ?? '',
+        fallbackUrl: json['fallbackUrl'] ?? '',
         approxSizeMB: json['approxSizeMB'] ?? 50,
         downloaded: json['downloaded'] ?? false,
         active: json['active'] ?? false,
@@ -57,31 +61,41 @@ class VoiceModel {
 class VoicePackManager {
   static const String _releaseBase =
       'https://github.com/chart9195-cyber/humaid-soul/releases/download/v1.0.0-voices';
+  static const String _cdnBase =
+      'https://cdn.jsdelivr.net/gh/chart9195-cyber/humaid-soul@v1.0.0-voices';
 
   static final List<VoiceModel> _defaultModels = [
     VoiceModel(
       id: 'amy', displayName: 'Amy (F)', language: 'en',
       fileName: 'amy.onnx', tokensName: 'tokens.txt',
       dataName: 'espeak-ng-data',
-      downloadUrl: '$_releaseBase/amy.zip', approxSizeMB: 52,
+      downloadUrl: '$_releaseBase/amy.zip',
+      fallbackUrl: '$_cdnBase/amy.zip',
+      approxSizeMB: 52,
     ),
     VoiceModel(
       id: 'john', displayName: 'John (M)', language: 'en',
       fileName: 'john.onnx', tokensName: 'tokens.txt',
       dataName: 'espeak-ng-data',
-      downloadUrl: '$_releaseBase/john.zip', approxSizeMB: 52,
+      downloadUrl: '$_releaseBase/john.zip',
+      fallbackUrl: '$_cdnBase/john.zip',
+      approxSizeMB: 52,
     ),
     VoiceModel(
       id: 'norman', displayName: 'Norman (M)', language: 'en',
       fileName: 'norman.onnx', tokensName: 'tokens.txt',
       dataName: 'espeak-ng-data',
-      downloadUrl: '$_releaseBase/norman.zip', approxSizeMB: 52,
+      downloadUrl: '$_releaseBase/norman.zip',
+      fallbackUrl: '$_cdnBase/norman.zip',
+      approxSizeMB: 52,
     ),
     VoiceModel(
       id: 'kristin', displayName: 'Kristin (F)', language: 'en',
       fileName: 'kristin.onnx', tokensName: 'tokens.txt',
       dataName: 'espeak-ng-data',
-      downloadUrl: '$_releaseBase/kristin.zip', approxSizeMB: 52,
+      downloadUrl: '$_releaseBase/kristin.zip',
+      fallbackUrl: '$_cdnBase/kristin.zip',
+      approxSizeMB: 52,
     ),
   ];
 
@@ -123,11 +137,5 @@ class VoicePackManager {
   static Future<VoiceModel?> getActive() async {
     final models = await load();
     try { return models.firstWhere((m) => m.active); } catch (_) { return null; }
-  }
-
-  /// Returns the directory where voice model files are stored.
-  static Future<String> getModelDir() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return dir.path;
   }
 }

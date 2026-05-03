@@ -18,6 +18,8 @@ dependencies:
   http: ^1.2.0
   just_audio: ^0.9.40
   sherpa_onnx: ^1.10.0
+  flutter_p2p_connection: ^0.1.0
+  bsdiff: ^0.1.1
 
 dev_dependencies:
   flutter_test:
