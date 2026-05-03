@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 ///
 /// Flutter 3.22 catches errors via two channels:
 /// 1. `FlutterError.onError` — framework & widget build errors
-/// 2. `PlatformDispatcher.instance.onError` — uncaught async errors
+/// 2. `WidgetsBinding.instance.platformDispatcher.onError` — uncaught async errors
 ///
 /// Both are forwarded to this class, which logs to disk and surfaces
 /// a gentle recovery screen instead of a cryptic stack trace.
@@ -31,9 +31,7 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
   void _setupErrorHandlers() {
     // Replace Flutter's default error reporter
     FlutterError.onError = (details) {
-      // Log to console in debug mode
       FlutterError.presentError(details);
-      // Log to file
       _logError(details.exceptionAsString());
       setState(() {
         _hasError = true;
@@ -41,14 +39,13 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
       });
     };
 
-    // Catch unhandled async errors
-    PlatformDispatcher.instance.onError = (error, stack) {
+    // Catch unhandled async errors (Flutter 3.22 API)
+    WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
       _logError('Unhandled async error: $error\n$stack');
       setState(() {
         _hasError = true;
         _errorMessage = 'Unhandled async error: $error';
       });
-      // Return true to mark the error as handled
       return true;
     };
 
@@ -89,7 +86,6 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
       final timestamp = DateTime.now().toIso8601String();
       await file.writeAsString('[ $timestamp ] $message\n', mode: FileMode.append);
     } catch (_) {
-      // If we can't log, at least print to console (visible via logcat)
       debugPrint('HUMAID SOUL ERROR: $message');
     }
   }
@@ -99,9 +95,6 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
       _hasError = false;
       _errorMessage = null;
     });
-    // Attempt to re‑initialize the engine on restart
-    // (The app's main() will be called again by the platform if we actually restart;
-    //  but here we just reset the UI state so the user can try again.)
   }
 
   @override
