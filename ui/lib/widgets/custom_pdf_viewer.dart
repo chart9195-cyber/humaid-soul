@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
+import '../services/word_map_cache.dart';
 
 class CustomPdfViewer extends StatefulWidget {
   final String filePath;
@@ -53,6 +54,18 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
 
   Future<void> _buildWordMap() async {
     try {
+      // ── Try cache first ──
+      final cached = await WordMapCache.load(widget.filePath);
+      if (cached != null) {
+        _wordMap = cached.wordMap;
+        _pageWidth = cached.pageWidth;
+        _pageHeight = cached.pageHeight;
+        _wordMapReady = true;
+        widget.onWordMapReady?.call();
+        return; // ✅ instant load
+      }
+
+      // ── Cache miss: full extraction ──
       final bytes = await File(widget.filePath).readAsBytes();
       final doc = sf_pdf.PdfDocument(inputBytes: bytes);
       _pageWidth = doc.pages[0].size.width;
@@ -73,6 +86,15 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
         }
       }
       doc.dispose();
+
+      // ── Save cache for next open ──
+      WordMapCache.save(
+        pdfPath: widget.filePath,
+        wordMap: _wordMap,
+        pageWidth: _pageWidth,
+        pageHeight: _pageHeight,
+      );
+
       _wordMapReady = true;
       widget.onWordMapReady?.call();
     } catch (e) {
@@ -82,6 +104,12 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
+  /// Deletes the cache for the current document (e.g. when PDF is updated).
+  Future<void> invalidateCache() async {
+    await WordMapCache.invalidate(widget.filePath);
+  }
+
+  // ── All existing methods unchanged ──
   String? _hitTestWord(int pageIdx, Offset pageCoord) {
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
     for (final entry in _wordMap[pageIdx]) {
@@ -117,7 +145,6 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     if (pageOffset == null) return;
     final word = _hitTestWord(pageIdx, pageOffset);
     if (word != null) {
-      // Check auto‑link targets first
       final targetPage = widget.linkTargets?[word];
       if (targetPage != null && widget.onAutoLinkTap != null) {
         widget.onAutoLinkTap!(targetPage);
@@ -171,11 +198,9 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
     final pageIdx = curPage - 1;
     if (pageIdx < 0 || pageIdx >= _wordMap.length) return [];
-
     final viewerWidth = _viewerSize.width;
     final scale = viewerWidth / _pageWidth;
     final scrollY = _controller.scrollOffset.dy;
-
     final rects = <Rect>[];
     for (final entry in _wordMap[pageIdx]) {
       if (words.contains(entry.text)) {
