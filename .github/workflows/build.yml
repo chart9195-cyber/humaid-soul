@@ -121,6 +121,7 @@ jobs:
           cp -r "$TEMP_DIR/temp_app/gradle" ui/android/ 2>/dev/null || true
           rm -rf "$TEMP_DIR"
           chmod +x ui/android/gradlew
+
       - name: Configure Android project
         run: |
           mkdir -p ui/android/app/proguard
@@ -167,13 +168,11 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=HUMAID SOUL, OU=Dev, O=Humaid, L=Unknown, ST=Unknown, C=UN"
           fi
-          # Write key.properties for Flutter to find
-          cat > ui/android/key.properties << 'KEYEOF'
-storePassword=humaid123
-keyPassword=humaid123
-keyAlias=my-key-alias
-storeFile=../app/humaid.keystore
-KEYEOF
+          # Write key.properties for Flutter (using echo, not heredoc)
+          echo "storePassword=humaid123" > ui/android/key.properties
+          echo "keyPassword=humaid123" >> ui/android/key.properties
+          echo "keyAlias=my-key-alias" >> ui/android/key.properties
+          echo "storeFile=../app/humaid.keystore" >> ui/android/key.properties
 
       - name: Install Flutter dependencies
         working-directory: ui
