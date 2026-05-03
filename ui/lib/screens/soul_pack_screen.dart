@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../services/soul_pack.dart';
 import '../services/content_manager.dart';
+import '../services/update_service.dart';
 import '../core_bridge.dart';
 
 class SoulPackScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
   List<SoulPack> _packs = [];
   bool _loading = true;
   Map<String, double> _downloadProgress = {};
+  bool _checkingUpdates = false;
 
   static const String _baseUrl =
       'https://github.com/chart9195-cyber/humaid-soul/releases/download/v1.0.0-soulpacks';
@@ -46,7 +48,6 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
 
   Future<void> _togglePack(SoulPack pack) async {
     if (!pack.active) {
-      // Enable the pack: download if missing, then load into engine
       final downloaded = await _isPackDownloaded(pack);
       if (!downloaded) {
         final shouldDownload = await showDialog<bool>(
@@ -65,7 +66,6 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
         final success = await _downloadPack(pack);
         if (!success) return;
       }
-      // Load the pack into the engine
       final packPath = '${await _docDir()}/${pack.fileName}';
       final bridge = CoreBridge();
       final ok = bridge.loadDomainDictionary(packPath);
@@ -78,7 +78,6 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
         return;
       }
     } else {
-      // Deactivate: unload domain dictionary from engine
       final bridge = CoreBridge();
       bridge.loadDomainDictionary(null);
     }
@@ -109,10 +108,73 @@ class _SoulPackScreenState extends State<SoulPackScreen> {
     }
   }
 
+  Future<void> _checkForUpdates() async {
+    setState(() => _checkingUpdates = true);
+    final updates = await UpdateService.checkForUpdates();
+    if (!mounted) return;
+    setState(() => _checkingUpdates = false);
+
+    if (updates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All Soul‑Packs are up to date.')),
+      );
+      return;
+    }
+
+    // Show a dialog listing available updates
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Updates Available'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: updates.map((u) => ListTile(
+            title: Text(u.artifactName),
+            subtitle: Text('Version ${u.version}'),
+          )).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              for (final update in updates) {
+                await UpdateService.applyUpdate(update,
+                  onProgress: (p) {
+                    // Could show a cumulative progress indicator
+                  },
+                );
+              }
+              _load(); // refresh the pack list
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Updated ${updates.length} pack(s).')),
+              );
+            },
+            child: const Text('Update All'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Soul-Packs')),
+      appBar: AppBar(
+        title: const Text('Soul-Packs'),
+        actions: [
+          IconButton(
+            icon: _checkingUpdates
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.system_update),
+            tooltip: 'Check for updates',
+            onPressed: _checkingUpdates ? null : _checkForUpdates,
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
