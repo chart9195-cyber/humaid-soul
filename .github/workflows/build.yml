@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Dictionary (General) ----------
+      # ---------- Dictionary ----------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -50,6 +50,12 @@ jobs:
         run: pip install onnx
       - name: Build Piper voice models
         run: python scripts/build_piper_models.py
+
+      # ---------- App Icon ----------
+      - name: Install Pillow for icon generation
+        run: pip install Pillow
+      - name: Generate app icon
+        run: python scripts/generate_icon.py ui/assets/icon
 
       # ---------- Rust cross-compilation ----------
       - name: Cache Rust target
@@ -120,6 +126,24 @@ jobs:
           mkdir -p ui/android/app/proguard
           echo "-keep class com.syncfusion.** { *; }" > ui/android/app/proguard/proguard-rules.pro
           echo "-dontwarn com.syncfusion.**" >> ui/android/app/proguard/proguard-rules.pro
+
+          # Copy adaptive icon components
+          mkdir -p ui/android/app/src/main/res/mipmap-anydpi-v26
+          if [ -f ui/assets/icon/ic_foreground.png ]; then
+            cp ui/assets/icon/ic_foreground.png ui/android/app/src/main/res/mipmap-hdpi/
+            cp ui/assets/icon/ic_foreground.png ui/android/app/src/main/res/mipmap-mdpi/
+            cp ui/assets/icon/ic_foreground.png ui/android/app/src/main/res/mipmap-xhdpi/
+            cp ui/assets/icon/ic_foreground.png ui/android/app/src/main/res/mipmap-xxhdpi/
+            cp ui/assets/icon/ic_foreground.png ui/android/app/src/main/res/mipmap-xxxhdpi/
+            cp ui/assets/icon/ic_background.png ui/android/app/src/main/res/mipmap-hdpi/
+            cp ui/assets/icon/ic_background.png ui/android/app/src/main/res/mipmap-mdpi/
+            cp ui/assets/icon/ic_background.png ui/android/app/src/main/res/mipmap-xhdpi/
+            cp ui/assets/icon/ic_background.png ui/android/app/src/main/res/mipmap-xxhdpi/
+            cp ui/assets/icon/ic_background.png ui/android/app/src/main/res/mipmap-xxxhdpi/
+            cp ui/assets/icon/ic_launcher.xml ui/android/app/src/main/res/mipmap-anydpi-v26/
+          fi
+
+          # PDF intent filter
           MAIN_MANIFEST="ui/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MAIN_MANIFEST" ]; then
             sed -i '/<\/activity>/i \
@@ -132,20 +156,54 @@ jobs:
                 <data android:mimeType="application/pdf"/> \
             </intent-filter>' "$MAIN_MANIFEST"
           fi
+
+          # ── Release signing (debug keystore) ──
+          KEYSTORE="ui/android/app/humaid.keystore"
+          if [ ! -f "$KEYSTORE" ]; then
+            keytool -genkey -v \
+              -keystore "$KEYSTORE" \
+              -storepass humaid123 \
+              -keypass humaid123 \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=HUMAID SOUL, OU=Dev, O=Humaid, L=Unknown, ST=Unknown, C=UN"
+          fi
+          # Write key.properties for Flutter to find
+          cat > ui/android/key.properties << 'KEYEOF'
+storePassword=humaid123
+keyPassword=humaid123
+keyAlias=my-key-alias
+storeFile=../app/humaid.keystore
+KEYEOF
+
       - name: Install Flutter dependencies
         working-directory: ui
         run: flutter pub get
+
+      # Build debug APK
       - name: Build debug APK
         working-directory: ui
         run: flutter build apk --debug
 
+      # Build release APK (signed)
+      - name: Build release APK
+        working-directory: ui
+        run: flutter build apk --release
+
       # ---------- Upload artifacts ----------
-      - name: Upload APK
+      - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: humaid-soul-debug-apk
           path: ui/build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Upload release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humaid-soul-release-apk
+          path: ui/build/app/outputs/flutter-apk/app-release.apk
+
       - name: Upload dictionary
         if: success()
         uses: actions/upload-artifact@v4
@@ -194,6 +252,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
+            ui/build/app/outputs/flutter-apk/app-release.apk
             ui/build/app/outputs/flutter-apk/app-debug.apk
             soul_dict.db.zst
             medical.db.zst
