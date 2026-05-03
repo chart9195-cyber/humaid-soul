@@ -13,19 +13,11 @@ class VocabScreen extends StatefulWidget {
 class _VocabScreenState extends State<VocabScreen> {
   List<VocabEntry> _entries = [];
   bool _loading = true;
-  final SyncService _sync = SyncService();
-  String _syncStatus = '';
 
   @override
   void initState() {
     super.initState();
     _load();
-    _sync.onStatusUpdate = (msg) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-        setState(() => _syncStatus = msg);
-      }
-    };
   }
 
   Future<void> _load() async {
@@ -39,9 +31,13 @@ class _VocabScreenState extends State<VocabScreen> {
   Future<void> _exportAnki() async {
     final path = await AnkiExport.exportVocabToCSV();
     if (path == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No words to export.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No words to export.')),
+      );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Exported to $path')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported to $path')),
+      );
     }
   }
 
@@ -56,45 +52,37 @@ class _VocabScreenState extends State<VocabScreen> {
             children: [
               const Text('Sync Vocabulary',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.tealAccent)),
-              const SizedBox(height: 16),
-              if (_syncStatus.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(_syncStatus, style: const TextStyle(color: Colors.white70)),
-                ),
+              const SizedBox(height: 12),
+              const Text('Copy your vocabulary to clipboard and share via any messenger, email, or Bluetooth.',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () {
-                        _sync.startHost();
+                        SyncService.shareToClipboard(context);
                         Navigator.pop(context);
                       },
-                      icon: const Icon(Icons.wifi_tethering),
-                      label: const Text('Host'),
+                      icon: const Icon(Icons.copy),
+                      label: const Text('Copy'),
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () {
-                        _sync.startClient();
+                        SyncService.importFromClipboard(context);
                         Navigator.pop(context);
                       },
-                      icon: const Icon(Icons.wifi),
-                      label: const Text('Join'),
+                      icon: const Icon(Icons.paste),
+                      label: const Text('Paste'),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              TextButton(
-                onPressed: () {
-                  _sync.disconnect();
-                  Navigator.pop(context);
-                },
-                child: const Text('Disconnect'),
-              ),
             ],
           ),
         ),

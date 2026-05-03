@@ -1,71 +1,25 @@
 import 'dart:convert';
-import 'dart:io';
-import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/material.dart';
 import 'vocab_bank.dart';
 
 class SyncService {
-  final FlutterP2pConnection _p2p = FlutterP2pConnection();
-  bool _isHost = false;
-  Function(String)? onStatusUpdate;
-
-  /// Start as host — wait for a client to connect.
-  Future<void> startHost() async {
-    _isHost = true;
-    onStatusUpdate?.call('Waiting for peer…');
-    _p2p.startHost();
-    _listenForConnections();
+  /// Encodes the entire vocabulary bank as a base64 JSON string.
+  static Future<String> exportToString() async {
+    final entries = await VocabBank.load();
+    final json = jsonEncode(entries.map((e) => e.toJson()).toList());
+    return base64Encode(utf8.encode(json));
   }
 
-  /// Start as client — connect to a host.
-  Future<void> startClient() async {
-    _isHost = false;
-    final peers = await _p2p.discoverPeers();
-    if (peers.isEmpty) {
-      onStatusUpdate?.call('No peers found');
-      return;
-    }
-    onStatusUpdate?.call('Connecting to ${peers.first.name}…');
-    await _p2p.connectToPeer(peers.first.id);
-    _listenForConnections();
-  }
-
-  void _listenForConnections() {
-    _p2p.connectionStream.listen((event) {
-      switch (event.type) {
-        case ConnectionType.connected:
-          onStatusUpdate?.call('Connected');
-          if (_isHost) _sendVocabBank();
-          break;
-        case ConnectionType.data:
-          if (!_isHost) _receiveVocabBank(event.data!);
-          break;
-        case ConnectionType.disconnected:
-          onStatusUpdate?.call('Disconnected');
-          break;
-      }
-    });
-  }
-
-  Future<void> _sendVocabBank() async {
-    onStatusUpdate?.call('Sending vocabulary…');
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/vocab_bank.json');
-    if (file.existsSync()) {
-      final bytes = await file.readAsBytes();
-      _p2p.sendData(utf8.decode(bytes));
-    }
-  }
-
-  Future<void> _receiveVocabBank(String json) async {
-    onStatusUpdate?.call('Receiving vocabulary…');
+  /// Imports vocabulary from a base64-encoded JSON string.
+  /// Merges with existing entries (deduplicates by word + sourceDocument).
+  static Future<int> importFromString(String encoded) async {
     try {
+      final json = utf8.decode(base64Decode(encoded));
       final incoming = (jsonDecode(json) as List)
           .map((e) => VocabEntry.fromJson(e))
           .toList();
       final existing = await VocabBank.load();
 
-      // Merge: deduplicate by word + sourceDocument, keep newest timestamp
       final merged = <String, VocabEntry>{};
       for (final e in [...existing, ...incoming]) {
         final key = '${e.word}|${e.sourceDocument}';
@@ -74,15 +28,40 @@ class SyncService {
           merged[key] = e;
         }
       }
-
       await VocabBank.save(merged.values.toList());
-      onStatusUpdate?.call('Vocabulary merged (${merged.length} entries)');
-    } catch (e) {
-      onStatusUpdate?.call('Sync error: $e');
+      return merged.length - existing.length;
+    } catch (_) {
+      return 0;
     }
   }
 
-  Future<void> disconnect() async {
-    await _p2p.disconnect();
+  /// Copies the encoded vocab string to the clipboard.
+  static Future<void> shareToClipboard(BuildContext context) async {
+    final data = await exportToString();
+    await Clipboard.setData(ClipboardData(text: data));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Vocabulary copied to clipboard. Paste on the other device.')),
+    );
+  }
+
+  /// Imports from clipboard and merges.
+  static Future<void> importFromClipboard(BuildContext context) async {
+    final data = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    if (data == null || data.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clipboard is empty.')),
+      );
+      return;
+    }
+    final added = await importFromString(data);
+    if (added > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported $added new words.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No new words to import.')),
+      );
+    }
   }
 }
