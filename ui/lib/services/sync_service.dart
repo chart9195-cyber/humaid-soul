@@ -1,17 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'vocab_bank.dart';
 
 class SyncService {
-  /// Encodes the entire vocabulary bank as a base64 JSON string.
   static Future<String> exportToString() async {
     final entries = await VocabBank.load();
     final json = jsonEncode(entries.map((e) => e.toJson()).toList());
     return base64Encode(utf8.encode(json));
   }
 
-  /// Imports vocabulary from a base64-encoded JSON string.
-  /// Merges with existing entries (deduplicates by word + sourceDocument).
   static Future<int> importFromString(String encoded) async {
     try {
       final json = utf8.decode(base64Decode(encoded));
@@ -35,33 +33,37 @@ class SyncService {
     }
   }
 
-  /// Copies the encoded vocab string to the clipboard.
   static Future<void> shareToClipboard(BuildContext context) async {
     final data = await exportToString();
     await Clipboard.setData(ClipboardData(text: data));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Vocabulary copied to clipboard. Paste on the other device.')),
-    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vocabulary copied to clipboard. Paste on the other device.')),
+      );
+    }
   }
 
-  /// Imports from clipboard and merges.
   static Future<void> importFromClipboard(BuildContext context) async {
     final data = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     if (data == null || data.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clipboard is empty.')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Clipboard is empty.')),
+        );
+      }
       return;
     }
     final added = await importFromString(data);
-    if (added > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported $added new words.')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No new words to import.')),
-      );
+    if (context.mounted) {
+      if (added > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Imported $added new words.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No new words to import.')),
+        );
+      }
     }
   }
 }

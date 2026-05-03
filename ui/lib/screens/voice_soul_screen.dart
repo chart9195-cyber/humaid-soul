@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/voice_pack_manager.dart';
 import '../services/tts_service.dart';
 import '../services/content_manager.dart';
@@ -29,15 +30,13 @@ class _VoiceSoulScreenState extends State<VoiceSoulScreen> {
     setState(() { _models = models; _loading = false; });
   }
 
-  /// Returns true if all required model files exist locally.
   Future<bool> _isDownloaded(VoiceModel model) async {
-    final dir = await VoicePackManager.getModelDir();
-    return File('${dir}/${model.fileName}').existsSync() &&
-           File('${dir}/tokens.txt').existsSync();
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/${model.fileName}').existsSync() &&
+           File('${dir.path}/tokens.txt').existsSync();
   }
 
   Future<void> _downloadAndActivate(VoiceModel model) async {
-    // Check if already downloaded
     final already = await _isDownloaded(model);
     if (already) {
       await _activateVoice(model);
@@ -47,19 +46,16 @@ class _VoiceSoulScreenState extends State<VoiceSoulScreen> {
     setState(() { _downloadingId = model.id; _downloadProgress = 0.0; });
 
     try {
-      final dir = await VoicePackManager.getModelDir();
-      // Download the zip
+      final dir = await getApplicationDocumentsDirectory();
       final zipPath = await ContentManager.downloadPack(
         model.downloadUrl,
         '${model.id}_voice.zip',
         onProgress: (p) => setState(() => _downloadProgress = p),
       );
 
-      // Extract (using system unzip)
-      final result = await Process.run('unzip', ['-o', zipPath, '-d', dir]);
+      final result = await Process.run('unzip', ['-o', zipPath, '-d', dir.path]);
       if (result.exitCode != 0) throw Exception('Unzip failed');
 
-      // Clean up zip
       await File(zipPath).delete();
 
       await VoicePackManager.markDownloaded(model.id);
