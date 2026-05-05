@@ -122,6 +122,142 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
     }
   }
 
-  // ── All existing methods unchanged ──
-  // (the full file content will be committed with all methods)
+  String? _hitTestWord(int pageIdx, Offset pageCoord) {
+    if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
+    for (final entry in _wordMap[pageIdx]) {
+      if (entry.bounds.contains(pageCoord)) {
+        final text = entry.text.trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return null;
+  }
+
+  _PdfHit? _widgetToPdf(Offset widgetPos) {
+    if (_pageWidth == 0 || _pageHeight == 0 || _viewerSize.isEmpty) return null;
+    final viewerWidth = _viewerSize.width;
+    final scale = viewerWidth / _pageWidth;
+    final pageNumber = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    final scrollOffset = _controller.scrollOffset;
+    final totalScrollY = (pageNumber - 1) * _pageHeight + scrollOffset.dy;
+    final pdfX = widgetPos.dx / scale;
+    final pdfY = totalScrollY + widgetPos.dy / scale;
+    final pageIdx = (pdfY / _pageHeight).floor();
+    if (pageIdx < 0 || pageIdx >= _wordMap.length) return null;
+    final pageY = pdfY - pageIdx * _pageHeight;
+    return _PdfHit(pageIdx, Offset(pdfX, pageY));
+  }
+
+  void _onTap(PdfGestureDetails details) {
+    if (!_wordMapReady) return;
+    final pageNumber = details.pageNumber;
+    if (pageNumber == null || pageNumber < 1) return;
+    final pageIdx = pageNumber - 1;
+    final pageOffset = details.pagePosition;
+    if (pageOffset == null) return;
+    final word = _hitTestWord(pageIdx, pageOffset);
+    if (word != null) {
+      final targetPage = widget.linkTargets?[word];
+      if (targetPage != null && widget.onAutoLinkTap != null) {
+        widget.onAutoLinkTap!(targetPage);
+      } else {
+        widget.onWordTap?.call(word, details.position);
+      }
+    } else {
+      widget.onNoText?.call();
+    }
+  }
+
+  void _onLongPress(LongPressStartDetails details) {
+    if (!_wordMapReady || widget.onLongPress == null) return;
+    final hit = _widgetToPdf(details.localPosition);
+    if (hit == null) return;
+    final word = _hitTestWord(hit.pageIndex, hit.pageCoord);
+    if (word != null) {
+      widget.onLongPress!(word, details.localPosition);
+    }
+  }
+
+  void jumpToPage(int page) {
+    if (_wordMap.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_wordMap.isNotEmpty) {
+          _controller.jumpToPage(page.clamp(1, _wordMap.length));
+        }
+      });
+      return;
+    }
+    final target = page.clamp(1, _wordMap.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _controller.jumpToPage(target);
+    });
+  }
+
+  double getScrollFraction() {
+    final totalPages = _wordMap.length;
+    if (totalPages <= 1) return 0;
+    final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    return ((curPage - 1) / (totalPages - 1)).clamp(0.0, 1.0);
+  }
+
+  List<Rect> getTierRects(Set<String> tierWords) => _getRectsForWords(tierWords);
+  List<Rect> getLinkRects(Set<String> linkWords) => _getRectsForWords(linkWords);
+
+  List<Rect> _getRectsForWords(Set<String> words) {
+    if (_viewerSize.isEmpty || _pageWidth == 0 || _pageHeight == 0 || !_wordMapReady) {
+      return [];
+    }
+    final curPage = _controller.pageNumber.isNaN ? 1 : _controller.pageNumber.toInt();
+    final pageIdx = curPage - 1;
+    if (pageIdx < 0 || pageIdx >= _wordMap.length) return [];
+
+    final viewerWidth = _viewerSize.width;
+    final scale = viewerWidth / _pageWidth;
+    final scrollY = _controller.scrollOffset.dy;
+
+    final rects = <Rect>[];
+    for (final entry in _wordMap[pageIdx]) {
+      if (words.contains(entry.text)) {
+        final left = entry.bounds.left * scale;
+        final top = (pageIdx * _pageHeight - entry.bounds.top) * scale + scrollY;
+        final width = entry.bounds.width * scale;
+        final height = entry.bounds.height * scale;
+        rects.add(Rect.fromLTWH(left, top, width, height));
+      }
+    }
+    return rects;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPressStart: _onLongPress,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final box = context.findRenderObject() as RenderBox?;
+            if (box != null) _viewerSize = box.size;
+          });
+          return SfPdfViewer.file(
+            File(widget.filePath),
+            controller: _controller,
+            onTap: _onTap,
+            onPageChanged: (details) => widget.onPageChanged?.call(),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PdfHit {
+  final int pageIndex;
+  final Offset pageCoord;
+  _PdfHit(this.pageIndex, this.pageCoord);
+}
+
+class WordEntry {
+  final String text;
+  final Rect bounds;
+  WordEntry({required this.text, required this.bounds});
 }

@@ -1,10 +1,10 @@
-import 'dart:collection';
 import 'dart:math';
-import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'pdf_text_service.dart';
 import 'tfidf_service.dart';
-import 'auto_link_service.dart';
 import '../core_bridge.dart';
+
+// ── Graph data classes (immutable, can cross isolates) ──
 
 class GraphNode {
   final String id;
@@ -13,9 +13,6 @@ class GraphNode {
   final bool isTier1;
   double x;
   double y;
-  double vx = 0, vy = 0;
-  List<String>? definitions;
-  List<String>? synonyms;
 
   GraphNode({
     required this.id,
@@ -30,24 +27,109 @@ class GraphNode {
 class GraphEdge {
   final String sourceId;
   final String targetId;
-  final double weight; // 0.0 - 1.0
-
-  GraphEdge({
-    required this.sourceId,
-    required this.targetId,
-    required this.weight,
-  });
+  final double weight;
+  GraphEdge({required this.sourceId, required this.targetId, required this.weight});
 }
 
 class KnowledgeGraph {
   final List<GraphNode> nodes;
   final List<GraphEdge> edges;
-
   KnowledgeGraph({required this.nodes, required this.edges});
 }
 
+// ── Input / output for the layout isolate ──
+
+class _LayoutInput {
+  final List<GraphNode> nodes;
+  final List<GraphEdge> edges;
+  _LayoutInput(this.nodes, this.edges);
+}
+
+class _LayoutOutput {
+  final List<GraphNode> nodes;
+  _LayoutOutput(this.nodes);
+}
+
+// ── Force‑directed layout (runs in background isolate) ──
+
+_LayoutOutput _runLayout(_LayoutInput input) {
+  const iterations = 120;
+  const double repulsion = 5000;
+  const double attraction = 0.01;
+  const double damping = 0.85;
+  final nodes = input.nodes;
+  final edges = input.edges;
+  final rng = Random(42);
+
+  // Initialize random positions
+  for (final node in nodes) {
+    node.x = rng.nextDouble() * 600 - 300;
+    node.y = rng.nextDouble() * 600 - 300;
+  }
+
+  for (int iter = 0; iter < iterations; iter++) {
+    // Repulsion
+    for (int i = 0; i < nodes.length; i++) {
+      for (int j = i + 1; j < nodes.length; j++) {
+        final dx = nodes[i].x - nodes[j].x;
+        final dy = nodes[i].y - nodes[j].y;
+        final dist = sqrt(dx * dx + dy * dy).clamp(1.0, double.infinity);
+        final force = repulsion / (dist * dist);
+        final fx = force * dx / dist;
+        final fy = force * dy / dist;
+        nodes[i].x += fx;
+        nodes[i].y += fy;
+        nodes[j].x -= fx;
+        nodes[j].y -= fy;
+      }
+    }
+    // Attraction along edges
+    for (final edge in edges) {
+      final src = nodes.firstWhere((n) => n.id == edge.sourceId);
+      final tgt = nodes.firstWhere((n) => n.id == edge.targetId);
+      final dx = tgt.x - src.x;
+      final dy = tgt.y - src.y;
+      final dist = sqrt(dx * dx + dy * dy).clamp(1.0, double.infinity);
+      final force = attraction * dist * edge.weight;
+      final fx = force * dx / dist;
+      final fy = force * dy / dist;
+      src.x += fx;
+      src.y += fy;
+      tgt.x -= fx;
+      tgt.y -= fy;
+    }
+    // Damping
+    for (final node in nodes) {
+      node.x *= damping;
+      node.y *= damping;
+    }
+  }
+
+  // Center
+  double minX = double.infinity, maxX = double.negativeInfinity;
+  double minY = double.infinity, maxY = double.negativeInfinity;
+  for (final node in nodes) {
+    if (node.x < minX) minX = node.x;
+    if (node.x > maxX) maxX = node.x;
+    if (node.y < minY) minY = node.y;
+    if (node.y > maxY) maxY = node.y;
+  }
+  final centerX = (minX + maxX) / 2;
+  final centerY = (minY + maxY) / 2;
+  for (final node in nodes) {
+    node.x -= centerX;
+    node.y -= centerY;
+  }
+
+  return _LayoutOutput(nodes);
+}
+
+// ── Public API ──
+
 class KnowledgeGraphService {
   /// Builds a knowledge graph for the given document.
+  /// Graph construction is I/O bound (file reads) and runs on the main isolate,
+  /// which is acceptable because the heavy CPU work (layout) is deferred.
   static Future<KnowledgeGraph> buildGraph(String pdfPath) async {
     // 1. Get TF‑IDF keywords (top 30)
     final tfidfScores = await TfidfService.computeTfidf(pdfPath);
@@ -58,12 +140,11 @@ class KnowledgeGraphService {
 
     if (topWords.isEmpty) return KnowledgeGraph(nodes: [], edges: []);
 
-    // 2. Get full text and word map for co‑occurrence
+    // 2. Get full text for co‑occurrence
     final textService = PdfTextService(pdfPath);
     final pageTexts = await textService.getPageTexts();
     final fullText = pageTexts.join(' ');
 
-    // Split into paragraphs (heuristic: split on double newline or 5+ spaces)
     final paragraphs = fullText.split(RegExp(r'\n\s*\n|\s{5,}'));
     final topWordSet = topWords.map((e) => e.key.toLowerCase()).toSet();
 
@@ -92,7 +173,7 @@ class KnowledgeGraphService {
         id: entry.key,
         label: entry.key,
         frequency: entry.value.round(),
-        isTier1: false, // can be updated from VocabBank later
+        isTier1: false,
       );
     }).toList();
 
@@ -117,5 +198,13 @@ class KnowledgeGraphService {
     }
 
     return KnowledgeGraph(nodes: nodes, edges: edges);
+  }
+
+  /// Runs the force‑directed layout on a background isolate.
+  static Future<List<GraphNode>> layoutGraph(KnowledgeGraph graph) async {
+    if (graph.nodes.isEmpty) return [];
+    final input = _LayoutInput(graph.nodes, graph.edges);
+    final output = await compute(_runLayout, input);
+    return output.nodes;
   }
 }

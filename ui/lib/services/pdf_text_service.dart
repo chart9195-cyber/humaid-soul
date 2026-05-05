@@ -7,6 +7,7 @@ class PdfTextService {
 
   PdfTextService(this.filePath);
 
+  /// Returns a list of page texts asynchronously (for use on the main isolate).
   Future<List<String>> getPageTexts() async {
     if (_pageTexts != null) return _pageTexts!;
     final bytes = await File(filePath).readAsBytes();
@@ -25,18 +26,21 @@ class PdfTextService {
     return _pageTexts!;
   }
 
+  /// Returns the text for a single page (1‑based index).
   Future<String?> getPageText(int pageIndex) async {
     final texts = await getPageTexts();
     if (pageIndex < 0 || pageIndex >= texts.length) return null;
     return texts[pageIndex];
   }
 
-  /// Synchronous version for use in isolates.
+  /// **Synchronous** version designed for use in background isolates.
+  /// Reads the PDF directly from disk and extracts all page texts.
   static List<String> getPageTextsSync(String filePath) {
     final bytes = File(filePath).readAsBytesSync();
     final doc = sf_pdf.PdfDocument(inputBytes: bytes);
     final extractor = sf_pdf.PdfTextExtractor(doc);
     final lines = extractor.extractTextLines();
+
     final map = <int, List<String>>{};
     for (final line in lines) {
       final page = line.pageIndex;

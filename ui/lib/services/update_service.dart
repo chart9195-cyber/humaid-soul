@@ -20,7 +20,11 @@ class UpdateService {
       'https://github.com/chart9195-cyber/humaid-soul/releases/latest/download/versions.json';
   static const String _downloadBase =
       'https://github.com/chart9195-cyber/humaid-soul/releases/latest/download';
+  static const Duration _manifestTimeout = Duration(seconds: 15);
 
+  /// Returns a list of [UpdateManifest] for artifacts that have a newer version
+  /// available, or an empty list if everything is up‑to‑date or the manifest
+  /// cannot be fetched.
   static Future<List<UpdateManifest>> checkForUpdates() async {
     final localVersions = await _loadLocalVersions();
     try {
@@ -28,15 +32,18 @@ class UpdateService {
       try {
         final response = await client
             .get(Uri.parse(_manifestUrl))
-            .timeout(const Duration(seconds: 15));
+            .timeout(_manifestTimeout);
+
         if (response.statusCode != 200) return [];
         final remote = jsonDecode(response.body) as Map<String, dynamic>;
         final updates = <UpdateManifest>[];
+
         for (final entry in remote.entries) {
           final artifact = entry.key;
           final remoteVersion = entry.value as String;
           final localVersion = localVersions[artifact];
-          if (localVersion == null || remoteVersion.compareTo(localVersion) > 0) {
+          if (localVersion == null ||
+              remoteVersion.compareTo(localVersion) > 0) {
             updates.add(UpdateManifest(
               artifactName: artifact,
               version: remoteVersion,
@@ -49,10 +56,13 @@ class UpdateService {
         client.close();
       }
     } catch (_) {
+      // Network error, manifest not reachable – silently return empty
       return [];
     }
   }
 
+  /// Downloads and applies an update, replacing the local artifact file.
+  /// Reports download progress via [onProgress] (0.0 → 1.0).
   static Future<void> applyUpdate(
     UpdateManifest update, {
     Function(double)? onProgress,
@@ -62,11 +72,14 @@ class UpdateService {
       update.artifactName,
       onProgress: onProgress,
     );
+
+    // Update local version record
     final versions = await _loadLocalVersions();
     versions[update.artifactName] = update.version;
     await _saveLocalVersions(versions);
   }
 
+  /// Returns a map of artifact names → version strings previously recorded.
   static Future<Map<String, String>> _loadLocalVersions() async {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/versions.json');
@@ -81,6 +94,8 @@ class UpdateService {
     await file.writeAsString(jsonEncode(versions));
   }
 
+  /// Records the version of an artifact that was bundled with the app,
+  /// so that subsequent checks know what is already installed.
   static Future<void> recordInitialVersion(
     String artifactName,
     String version,

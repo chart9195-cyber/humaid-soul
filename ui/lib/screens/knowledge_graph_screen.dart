@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../services/knowledge_graph_service.dart';
 import '../core_bridge.dart';
+import 'dart:convert';
 
 class KnowledgeGraphScreen extends StatefulWidget {
   final String pdfPath;
@@ -23,96 +24,30 @@ class _KnowledgeGraphScreenState extends State<KnowledgeGraphScreen> {
   }
 
   Future<void> _buildGraph() async {
+    // 1. Build the graph (I/O-bound, main isolate is fine)
     final graph = await KnowledgeGraphService.buildGraph(widget.pdfPath);
-    // Initialize random positions
-    final rng = Random(42);
-    for (final node in graph.nodes) {
-      node.x = rng.nextDouble() * 400;
-      node.y = rng.nextDouble() * 400;
-    }
+
+    if (!mounted) return;
     setState(() {
       _graph = graph;
       _loading = false;
     });
-    _simulateLayout();
-  }
 
-  void _simulateLayout() {
-    if (_graph == null) return;
-    const iterations = 100;
-    const double repulsion = 5000;
-    const double attraction = 0.01;
-    const double damping = 0.9;
-
-    final nodes = _graph!.nodes;
-    final edges = _graph!.edges;
-
-    for (int iter = 0; iter < iterations; iter++) {
-      // Repulsion between all node pairs
-      for (int i = 0; i < nodes.length; i++) {
-        for (int j = i + 1; j < nodes.length; j++) {
-          final dx = nodes[i].x - nodes[j].x;
-          final dy = nodes[i].y - nodes[j].y;
-          final dist = sqrt(dx * dx + dy * dy).clamp(1.0, double.infinity);
-          final force = repulsion / (dist * dist);
-          final fx = force * dx / dist;
-          final fy = force * dy / dist;
-          nodes[i].vx += fx;
-          nodes[i].vy += fy;
-          nodes[j].vx -= fx;
-          nodes[j].vy -= fy;
-        }
-      }
-      // Attraction along edges
-      for (final edge in edges) {
-        final src = nodes.firstWhere((n) => n.id == edge.sourceId);
-        final tgt = nodes.firstWhere((n) => n.id == edge.targetId);
-        final dx = tgt.x - src.x;
-        final dy = tgt.y - src.y;
-        final dist = sqrt(dx * dx + dy * dy).clamp(1.0, double.infinity);
-        final force = attraction * dist * edge.weight;
-        final fx = force * dx / dist;
-        final fy = force * dy / dist;
-        src.vx += fx;
-        src.vy += fy;
-        tgt.vx -= fx;
-        tgt.vy -= fy;
-      }
-      // Apply velocity
-      for (final node in nodes) {
-        node.x += node.vx;
-        node.y += node.vy;
-        node.vx *= damping;
-        node.vy *= damping;
-      }
+    // 2. Offload the layout simulation to a background isolate
+    if (graph.nodes.isNotEmpty) {
+      final laidOutNodes = await KnowledgeGraphService.layoutGraph(graph);
+      if (!mounted) return;
+      setState(() {
+        // replace nodes with the positioned ones
+        _graph = KnowledgeGraph(nodes: laidOutNodes, edges: graph.edges);
+      });
     }
-
-    // Center the graph
-    double minX = double.infinity, maxX = double.negativeInfinity;
-    double minY = double.infinity, maxY = double.negativeInfinity;
-    for (final node in nodes) {
-      if (node.x < minX) minX = node.x;
-      if (node.x > maxX) maxX = node.x;
-      if (node.y < minY) minY = node.y;
-      if (node.y > maxY) maxY = node.y;
-    }
-    final centerX = (minX + maxX) / 2;
-    final centerY = (minY + maxY) / 2;
-    for (final node in nodes) {
-      node.x -= centerX;
-      node.y -= centerY;
-    }
-
-    setState(() {}); // repaint
   }
 
   void _onTapNode(String nodeId) async {
     setState(() => _selectedNodeId = nodeId);
-    // Look up definitions for the tapped word
     final bridge = CoreBridge();
     final jsonStr = bridge.lookup(nodeId);
-    // The HUD will show the definition
-    // For now, we'll store it in the selected node? We'll handle with a bottom sheet.
     if (jsonStr != '[]') {
       showModalBottomSheet(
         context: context,
@@ -133,12 +68,19 @@ class _KnowledgeGraphScreenState extends State<KnowledgeGraphScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(word, style: const TextStyle(color: Colors.tealAccent, fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(word,
+              style: const TextStyle(
+                  color: Colors.tealAccent,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
           if (entry != null) ...[
             const SizedBox(height: 8),
-            Text(entry['word_type'] ?? '', style: const TextStyle(color: Colors.white70)),
+            Text(entry['word_type'] ?? '',
+                style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 8),
-            ...((entry['definitions'] as List?)?.cast<String>() ?? []).take(3).map((d) => Text('• $d')),
+            ...((entry['definitions'] as List?)?.cast<String>() ?? [])
+                .take(3)
+                .map((d) => Text('• $d')),
           ],
         ],
       ),
@@ -176,7 +118,8 @@ class _KnowledgeGraphScreenState extends State<KnowledgeGraphScreen> {
                                 alignment: Alignment.center,
                                 child: Text(
                                   node.label,
-                                  style: const TextStyle(fontSize: 9, color: Colors.white),
+                                  style: const TextStyle(
+                                      fontSize: 9, color: Colors.white),
                                   textAlign: TextAlign.center,
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 2,
@@ -198,7 +141,8 @@ class _GraphPainter extends CustomPainter {
   final List<GraphEdge> edges;
   final String? selectedNodeId;
 
-  _GraphPainter({required this.nodes, required this.edges, this.selectedNodeId});
+  _GraphPainter(
+      {required this.nodes, required this.edges, this.selectedNodeId});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -242,7 +186,8 @@ class _GraphPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       );
       textPainter.layout(maxWidth: 60);
-      textPainter.paint(canvas, center - Offset(textPainter.width / 2, textPainter.height / 2));
+      textPainter.paint(
+          canvas, center - Offset(textPainter.width / 2, textPainter.height / 2));
     }
   }
 
