@@ -14,13 +14,11 @@ class PdfTextService {
     final extractor = sf_pdf.PdfTextExtractor(doc);
     final lines = extractor.extractTextLines();
 
-    // Group lines by page index
     final map = <int, List<String>>{};
     for (final line in lines) {
       final page = line.pageIndex;
       map.putIfAbsent(page, () => []).add(line.text);
     }
-    // Use count instead of length for PdfPageCollection
     final totalPages = doc.pages.count;
     _pageTexts = List.generate(totalPages, (i) => (map[i] ?? []).join(' '));
     doc.dispose();
@@ -31,5 +29,22 @@ class PdfTextService {
     final texts = await getPageTexts();
     if (pageIndex < 0 || pageIndex >= texts.length) return null;
     return texts[pageIndex];
+  }
+
+  /// Synchronous version for use in isolates.
+  static List<String> getPageTextsSync(String filePath) {
+    final bytes = File(filePath).readAsBytesSync();
+    final doc = sf_pdf.PdfDocument(inputBytes: bytes);
+    final extractor = sf_pdf.PdfTextExtractor(doc);
+    final lines = extractor.extractTextLines();
+    final map = <int, List<String>>{};
+    for (final line in lines) {
+      final page = line.pageIndex;
+      map.putIfAbsent(page, () => []).add(line.text);
+    }
+    final totalPages = doc.pages.count;
+    final result = List.generate(totalPages, (i) => (map[i] ?? []).join(' '));
+    doc.dispose();
+    return result;
   }
 }
