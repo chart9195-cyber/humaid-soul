@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf_pdf;
 import '../services/word_map_cache.dart';
@@ -105,7 +106,7 @@ class CustomPdfViewerState extends State<CustomPdfViewer> {
       _pageWidth = result.pageWidth;
       _pageHeight = result.pageHeight;
 
-      // Save cache (also in background)
+      // Save cache
       WordMapCache.save(
         pdfPath: widget.filePath,
         wordMap: _wordMap,
